@@ -53,6 +53,9 @@ DEFAULTS = {
     "ch_dimmer": 5,
     "ch_zoom": 6,
     "ch_zoom_fine": 0,   # >0 to enable 16-bit zoom
+    # Optional static color temperature channel for the legacy single-fixture mode
+    "ch_color_temp": 11,
+    "color_temp_value": 0,
 
     # Soft limits (0..65535)
     "pan_min": 2000,
@@ -130,6 +133,7 @@ FIXTURE_FIELDS = [
     "id","enabled","universe","start_addr",
     "pan_coarse","pan_fine","tilt_coarse","tilt_fine",
     "dimmer","zoom","zoom_fine",
+    "color_temp_channel","color_temp_value",
     "invert_pan","invert_tilt","pan_bias","tilt_bias"
     ]
 
@@ -212,6 +216,12 @@ def expo_curve(v, expo, deadband):
     return s * (abs(v) ** (1.0 + expo))
 
 def clamp16(x): return max(0, min(65535, int(x)))
+
+def clamp8(x):
+    try:
+        return max(0, min(255, int(x)))
+    except Exception:
+        return 0
 
 def to16(v):
     v = clamp16(v)
@@ -387,14 +397,17 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
         if pf>0: frame[pf-1] = pfv
         if tc>0: frame[tc-1] = tcv
         if tf>0: frame[tf-1] = tfv
-        if dc>0: frame[dc-1] = max(0, min(255, int(dimmer8)))
+        if dc>0: frame[dc-1] = clamp8(dimmer8)
         if zc>0:
             if zf>0:
                 zc8, zf8 = to16(max(0, min(65535, int(zoom_val))))
                 frame[zc-1] = zc8
                 frame[zf-1] = zf8
             else:
-                frame[zc-1] = max(0, min(255, int(zoom_val)))
+                frame[zc-1] = clamp8(zoom_val)
+        ch_temp = settings.get("ch_color_temp", 0)
+        if ch_temp and ch_temp > 0:
+            frame[ch_temp-1] = clamp8(settings.get("color_temp_value", 0))
     else:
         for fx in fixtures:
             if not fx.get("enabled", False):
@@ -423,7 +436,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
 
             # Dimmer
             dC = fx.get("dimmer", 0)
-            if dC>0: frame[dC-1] = max(0, min(255, int(dimmer8)))
+            if dC>0: frame[dC-1] = clamp8(dimmer8)
 
             # Zoom
             zC, zF = fx.get("zoom", 0), fx.get("zoom_fine", 0)
@@ -433,7 +446,11 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
                     frame[zC-1] = zC8
                     frame[zF-1] = zF8
                 else:
-                    frame[zC-1] = max(0, min(255, int(zoom_val)))
+                    frame[zC-1] = clamp8(zoom_val)
+
+            ch_temp = fx.get("color_temp_channel", 0)
+            if ch_temp and ch_temp > 0:
+                frame[ch_temp-1] = clamp8(fx.get("color_temp_value", 0))
 
     # push per-universe + debug
     for uni, data in frames.items():
@@ -468,7 +485,13 @@ def normalize_fixture(fx):
     out = {}
     out["id"] = str(fx.get("id","")).strip()
     out["enabled"] = str(fx.get("enabled","True")).lower() in ("1","true","yes","on")
-    for k in ("universe","start_addr","pan_coarse","pan_fine","tilt_coarse","tilt_fine","dimmer","zoom","zoom_fine","pan_bias","tilt_bias"):
+    for k in (
+        "universe","start_addr",
+        "pan_coarse","pan_fine","tilt_coarse","tilt_fine",
+        "dimmer","zoom","zoom_fine",
+        "color_temp_channel","color_temp_value",
+        "pan_bias","tilt_bias"
+    ):
         try: out[k] = int(str(fx.get(k, 0)))
         except: out[k] = 0
     out["invert_pan"]  = str(fx.get("invert_pan","False")).lower() in ("1","true","yes","on")
@@ -889,6 +912,9 @@ INDEX_HTML = """
             <div><label>Zoom</label><input type="number" name="zoom"></div>
             <div><label>Zoom Fine</label><input type="number" name="zoom_fine"></div>
 
+            <div><label>Color Temp Channel (DMX 11)</label><input type="number" name="color_temp_channel" value="11"></div>
+            <div><label>Color Temp Value</label><input type="number" name="color_temp_value" value="0" min="0" max="255"></div>
+
             <div><label>Pan Bias</label><input type="number" name="pan_bias" value="0"></div>
             <div><label>Tilt Bias</label><input type="number" name="tilt_bias" value="0"></div>
 
@@ -913,7 +939,7 @@ INDEX_HTML = """
         <div id="import-area" style="display:none;margin-top:8px">
           <textarea id="csvtext" placeholder="Paste CSV here..." style="width:100%;min-height:120px;border:1px solid #374151;border-radius:8px;padding:8px;background:#0b1020;color:#dfe7ff"></textarea>
           <div class="switch"><button class="btn" onclick="doImport()">Import</button><button class="btn danger" onclick="hideImport()">Cancel</button></div>
-          <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
+          <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
         </div>
 
         <!-- Virtual HOTAS -->
@@ -1071,7 +1097,7 @@ INDEX_HTML = """
           <div class="row" style="align-items:flex-start">
             <div style="flex:1">
               <b>${f.id}</b> ${f.enabled ? '<span class="badge ok">Enabled</span>' : '<span class="badge warn">Disabled</span>'}
-              <div class="small muted">Uni ${f.universe} • Pan ${f.pan_coarse}/${f.pan_fine||0} • Tilt ${f.tilt_coarse}/${f.tilt_fine||0} • Dim ${f.dimmer||0} • Zoom ${f.zoom||0}${f.zoom_fine?('/'+f.zoom_fine):''}</div>
+              <div class="small muted">Uni ${f.universe} • Pan ${f.pan_coarse}/${f.pan_fine||0} • Tilt ${f.tilt_coarse}/${f.tilt_fine||0} • Dim ${f.dimmer||0} • Zoom ${f.zoom||0}${f.zoom_fine?('/'+f.zoom_fine):''}${colorTempSummary(f)}</div>
               <div class="small muted">Invert P:${f.invert_pan? 'Y':'N'} T:${f.invert_tilt? 'Y':'N'} • Bias P:${f.pan_bias||0} T:${f.tilt_bias||0}</div>
               <details style="margin-top:8px">
                 <summary>Edit</summary>
@@ -1086,6 +1112,8 @@ INDEX_HTML = """
                   ${editInput('Dimmer','dimmer',f.dimmer,'number')}
                   ${editInput('Zoom','zoom',f.zoom,'number')}
                   ${editInput('Zoom F','zoom_fine',f.zoom_fine,'number')}
+                  ${editInput('Color Temp Ch','color_temp_channel',f.color_temp_channel,'number')}
+                  ${editInput('Color Temp Val','color_temp_value',f.color_temp_value,'number')}
                   ${editInput('Invert Pan','invert_pan',f.invert_pan)}
                   ${editInput('Invert Tilt','invert_tilt',f.invert_tilt)}
                   ${editInput('Pan Bias','pan_bias',f.pan_bias,'number')}
@@ -1110,6 +1138,16 @@ INDEX_HTML = """
         const v = (typeof value==='boolean') ? (value ? 'True' : 'False') : (value??'');
         return `<div><label>${label}</label><input type="text" name="${name}" value="${v}"></div>`;
       }
+    }
+
+    function colorTempSummary(f){
+      const chan = Number(f.color_temp_channel || 0);
+      if(chan > 0){
+        const valRaw = f.color_temp_value;
+        const val = (valRaw === undefined || valRaw === null || valRaw === '') ? '' : `=${valRaw}`;
+        return ` • Color Temp ${chan}${val}`;
+      }
+      return '';
     }
 
     async function toggleFixture(id, enabled){
