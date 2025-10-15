@@ -1,0 +1,80 @@
+{
+  "priority": 150,
+  "fps": 60,
+
+  "default_universe": 1,
+  "multi_universe_enabled": false,
+
+  "gpio_enabled": true,
+  "gpio_green_pin": 17,
+  "gpio_red_pin": 27,
+  "gpio_active_low": false,
+
+  "ax_pan": 0,
+  "ax_tilt": 1,
+  "ax_throt": 2,
+
+  "btn_activate": 5,
+  "btn_release": 1,
+  "btn_flash10": 0,
+  "btn_dim_off": 3,
+  "btn_fine": 4,
+  "btn_zoom_mod": 6,
+
+  "invert_pan": true,
+  "invert_tilt": false,
+  "throttle_invert": false,
+
+  "pan_min": 2000,
+  "pan_max": 63000,
+  "tilt_min": 3000,
+  "tilt_max": 60000,
+
+  "deadband": 0.03,
+  "expo": 0.6,
+  "speed": 2200,
+  "fine_divisor": 3,
+
+  "flash10_level": 26,
+
+  "fixtures": [
+    {
+      "id": "FZ-L",
+      "enabled": true,
+      "universe": 1,
+      "start_addr": 1,
+
+      "pan_coarse": 1,
+      "pan_fine": 2,
+      "tilt_coarse": 3,
+      "tilt_fine": 4,
+      "dimmer": 5,
+      "zoom": 6,
+      "zoom_fine": 0,
+
+      "invert_pan": false,
+      "invert_tilt": false,
+      "pan_bias": 0,
+      "tilt_bias": 0
+    },
+    {
+      "id": "FZ-R",
+      "enabled": true,
+      "universe": 1,
+      "start_addr": 61,
+
+      "pan_coarse": 61,
+      "pan_fine": 62,
+      "tilt_coarse": 63,
+      "tilt_fine": 64,
+      "dimmer": 65,
+      "zoom": 66,
+      "zoom_fine": 0,
+
+      "invert_pan": true,
+      "invert_tilt": false,
+      "pan_bias": 0,
+      "tilt_bias": 0
+    }
+  ]
+}
