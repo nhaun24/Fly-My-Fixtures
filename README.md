@@ -3,6 +3,7 @@
 Headless Python app that reads a joystick (e.g., Thrustmaster HOTAS), drives fixtures over **sACN (E1.31)**, and serves a **web UI** to configure fixtures dynamically (add/edit/toggle, single or multi-universe). Supports **GPIO LEDs on Raspberry Pi** (Green=Active, Red=Error). Settings persist to `settings.json` and auto-backup to `fixtures.csv`.
 
 ---
+<img width="903" height="1821" alt="image" src="https://github.com/user-attachments/assets/bfd30677-8244-49d9-9ec5-4ff243821b07" />
 
 ## Features
 
