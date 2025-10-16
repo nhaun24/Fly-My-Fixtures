@@ -784,46 +784,68 @@ INDEX_HTML = """
     <title>Thrust-Daddy</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;max-width:1100px;margin:24px auto;padding:0 12px;background:#0f1115;color:#e5e7eb}
+     :root{color-scheme:dark}
+     body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,Arial,sans-serif;max-width:1100px;margin:24px auto;padding:0 12px;background:#0f1115;color:#e5e7eb;line-height:1.45}
      h1{margin-bottom:6px}
-     .row{display:flex;gap:16px;flex-wrap:wrap}
-     .card{flex:1 1 360px;border:1px solid #374151;border-radius:12px;padding:16px;background:#111827;box-shadow:0 1px 3px rgba(0,0,0,.2)}
-     label{display:block;margin:8px 0 4px}
-     .grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:10px}
-     .grid > div{display:flex;flex-direction:column;gap:4px}
-     input[type=number],input[type=text],select{
-       width:100%;padding:6px 8px;border:1px solid #444;border-radius:6px;background:#1a1d25;color:#e5e7eb
-     }
-     .fxgrid{
-      display:grid;
-      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-      gap:12px;
-    }
-    .cbrow{display:flex;gap:8px;align-items:center;margin-top:6px}
-     input[type=checkbox]{width:auto;height:auto;transform:translateY(1px)}
-     .cbrow{display:flex;gap:8px;align-items:center;margin-top:6px}
-     .btn{padding:10px 14px;border-radius:10px;border:1px solid #4b5563;background:#1f2937;color:#e5e7eb;cursor:pointer}
+     h3{margin:0 0 12px}
+     h4{margin:8px 0 12px}
+     .panel-grid{display:flex;gap:16px;flex-wrap:wrap}
+     .card{flex:1 1 320px;border:1px solid #2f3541;border-radius:14px;padding:20px;background:#111827;box-shadow:0 4px 16px rgba(8,10,20,.35)}
+     .card.wide{flex-basis:100%}
+     label{display:block;font-size:14px;font-weight:600;color:#f3f4f6}
+     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;align-items:start}
+     .grid > div{display:flex;flex-direction:column;gap:6px}
+     input[type=number],input[type=text],select{width:100%;padding:10px 12px;border:1px solid #303845;border-radius:10px;background:#1a1d25;color:#e5e7eb;font-size:14px;transition:border-color .15s ease,box-shadow .15s ease}
+     input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
+     input[type=checkbox]{width:auto;height:auto;accent-color:#2563eb}
+     input[type=range]{width:100%}
+     textarea{width:100%;min-height:220px;border:1px solid #303845;border-radius:12px;padding:12px;background:#0b1020;color:#dfe7ff;font-family:ui-monospace,Consolas,monospace;font-size:14px}
+     textarea:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
+     .cbrow{display:flex;gap:8px;align-items:center;margin-top:6px;font-weight:500}
+     .btn{padding:10px 16px;border-radius:10px;border:1px solid #4b5563;background:#1f2937;color:#e5e7eb;cursor:pointer;font-weight:600;transition:background .15s ease,border-color .15s ease,transform .1s ease}
      .btn:hover{background:#273244}
+     .btn:active{transform:scale(.98)}
      .btn.primary{background:#2563eb;border-color:#2563eb}
+     .btn.primary:hover{background:#1e4fc7}
      .btn.danger{background:#dc2626;border-color:#dc2626}
-     .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px}
-     .ok{background:#065f46;color:#d1fae5}
-     .err{background:#991b1b;color:#fee2e2}
-     .warn{background:#92400e;color:#fef3c7}
-     textarea{width:100%;min-height:220px;border:1px solid #374151;border-radius:12px;padding:10px;background:#0b1020;color:#dfe7ff;font-family:ui-monospace,Consolas,monospace}
-     .switch{display:flex;gap:8px;align-items:center;margin:4px 0}
+     .btn.danger:hover{background:#b91c1c}
+     .tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0 20px}
+     .tab-btn{padding:10px 18px;border-radius:999px;border:1px solid #2f3541;background:#111827;color:#e5e7eb;font-weight:600;cursor:pointer;transition:background .15s ease,border-color .15s ease,box-shadow .15s ease}
+     .tab-btn.active{background:#2563eb;border-color:#2563eb;box-shadow:0 6px 18px rgba(37,99,235,.35)}
+     .tab-panel{display:none}
+     .tab-panel.active{display:block}
+     .switch{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
+     .form-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
+     .form-actions .btn{min-width:120px;justify-content:center;text-align:center}
      .pill{width:12px;height:12px;border-radius:999px;background:#1f2937;border:1px solid #374151}
      .pill.ok{background:#22c55e;border-color:#16a34a}
      .pill.err{background:#ef4444;border-color:#b91c1c}
      .pill.off{background:#374151;border-color:#4b5563}
+     .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600}
+     .ok{background:#065f46;color:#d1fae5}
+     .err{background:#991b1b;color:#fee2e2}
+     .warn{background:#92400e;color:#fef3c7}
      small{color:#9ca3af}
      .muted{color:#9ca3af}
      .small{font-size:12px}
-     .fxgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-     details.section{border:1px solid #2f3541;border-radius:10px;margin-bottom:10px;overflow:hidden}
-     details.section > summary{cursor:pointer;padding:10px 12px;background:#0f141d;font-weight:600;border-bottom:1px solid #2f3541;list-style:none}
-     details.section[open] > summary{background:#101826}
-     details.section > .inner{padding:12px}
+     details.section{border:1px solid #2f3541;border-radius:12px;margin-bottom:12px;overflow:hidden;background:#0f141d}
+     details.section > summary{cursor:pointer;padding:12px 14px;background:#101826;font-weight:600;border-bottom:1px solid #2f3541;list-style:none}
+     details.section[open] > summary{background:#142033}
+     details.section > .inner{padding:14px}
+     .fxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;align-items:start}
+     .fixture-card{border:1px solid #2f3541;border-radius:12px;padding:16px;background:#101826;display:flex;flex-direction:column;gap:8px}
+     .fixture-card details{background:#0f141d;border-radius:10px;border:1px solid #2b3140;padding:0}
+     .fixture-card details > summary{padding:10px 14px;cursor:pointer;font-weight:600}
+     .fixture-card details[open] > summary{background:#142033}
+     .fixture-card details > .fxgrid{padding:16px}
+     .fixture-card details > .form-actions{padding:0 16px 16px}
+     #fixture-list{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+     .subcard{border:1px solid #2b3140;border-radius:12px;padding:18px;background:#0f141d;margin-top:20px}
+     #import-area{margin-top:16px}
+     #logs{min-height:240px}
+     .virtual-layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;margin-top:16px}
+     .virtual-pad{flex:0 0 auto}
+     .virtual-controls{flex:1 1 240px;display:flex;flex-direction:column;gap:12px}
      /* XY pad */
      #pad{user-select:none;-webkit-user-select:none;touch-action:none;cursor:crosshair}
     </style>
@@ -835,69 +857,74 @@ INDEX_HTML = """
         <span class="switch"><span>Health:</span><span id="health-pill" class="pill off"></span><small id="health-text">Unknown</small></span>
       </p>
 
-      <div class="row">
-        <!-- Controls full width -->
-        <div class="card" style="flex:1 1 100%">
-          <h3>Controls</h3>
-          <div class="switch">
-            <button class="btn primary" onclick="activate()">Activate</button>
-            <button class="btn danger" onclick="release()">Release</button>
+      <div class="tabbar" role="tablist">
+        <button type="button" class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button type="button" class="tab-btn" data-tab="settings">Settings</button>
+        <button type="button" class="tab-btn" data-tab="usability">Usability &amp; Logs</button>
+      </div>
+
+      <section class="tab-panel active" data-tab="dashboard">
+        <div class="panel-grid">
+          <div class="card wide">
+            <h3>Controls</h3>
+            <div class="switch">
+              <button class="btn primary" onclick="activate()">Activate</button>
+              <button class="btn danger" onclick="release()">Release</button>
+            </div>
+            <p class="small muted">Joystick: <span id="joy-name">-</span> • Axes: <span id="joy-axes">0</span> • Buttons: <span id="joy-buttons">0</span></p>
+            <p class="small muted">Last frame: <span id="last-frame">-</span></p>
           </div>
-          <p class="small muted">Joystick: <span id="joy-name">-</span> • Axes: <span id="joy-axes">0</span> • Buttons: <span id="joy-buttons">0</span></p>
-          <p class="small muted">Last frame: <span id="last-frame">-</span></p>
         </div>
+      </section>
 
-        <!-- Settings full width -->
-        <div class="card" style="flex:1 1 100%">
-          <h3>Settings</h3>
-          <form id="settings-form" onsubmit="saveSettings();return false;">
+      <section class="tab-panel" data-tab="settings">
+        <div class="panel-grid">
+          <div class="card wide">
+            <h3>Settings</h3>
+            <form id="settings-form" onsubmit="saveSettings();return false;">
 
-            <!-- sACN / Output -->
-            <details class="section" open>
-              <summary>Output (sACN)</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div><label>Priority</label><input type="number" name="priority"></div>
-                  <div><label>FPS</label><input type="number" name="fps"></div>
-                  <div><label>Default Universe</label><input type="number" name="default_universe"></div>
+              <!-- sACN / Output -->
+              <details class="section" open>
+                <summary>Output (sACN)</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div><label>Priority</label><input type="number" name="priority"></div>
+                    <div><label>FPS</label><input type="number" name="fps"></div>
+                    <div><label>Default Universe</label><input type="number" name="default_universe"></div>
+                  </div>
                 </div>
-              </div>
-            </details>
+              </details>
 
-            <!-- Input mapping -->
-            <details class="section" open>
-              <summary>Input Mapping (Axes & Buttons)</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div><label>AX Pan</label><input type="number" name="ax_pan"></div>
-                  <div><label>AX Tilt</label><input type="number" name="ax_tilt"></div>
-                  <div><label>AX Throttle</label><input type="number" name="ax_throt"></div>
-                  <div><label>AX Zoom</label><input type="number" name="ax_zoom" placeholder="-1 to disable"></div>
+              <!-- Input mapping -->
+              <details class="section" open>
+                <summary>Input Mapping (Axes &amp; Buttons)</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div><label>AX Pan</label><input type="number" name="ax_pan"></div>
+                    <div><label>AX Tilt</label><input type="number" name="ax_tilt"></div>
+                    <div><label>AX Throttle</label><input type="number" name="ax_throt"></div>
+                    <div><label>AX Zoom</label><input type="number" name="ax_zoom" placeholder="-1 to disable"></div>
 
-                  <div><label>BTN Activate</label><input type="number" name="btn_activate"></div>
-                  <div><label>BTN Release</label><input type="number" name="btn_release"></div>
-                  <div><label>BTN Flash10</label><input type="number" name="btn_flash10"></div>
-                  <div><label>BTN Dim Off</label><input type="number" name="btn_dim_off"></div>
-                  <div><label>BTN Fine</label><input type="number" name="btn_fine"></div>
-                  <div><label>BTN Zoom Mod</label><input type="number" name="btn_zoom_mod"></div>
+                    <div><label>BTN Activate</label><input type="number" name="btn_activate"></div>
+                    <div><label>BTN Release</label><input type="number" name="btn_release"></div>
+                    <div><label>BTN Flash10</label><input type="number" name="btn_flash10"></div>
+                    <div><label>BTN Dim Off</label><input type="number" name="btn_dim_off"></div>
+                    <div><label>BTN Fine</label><input type="number" name="btn_fine"></div>
+                    <div><label>BTN Zoom Mod</label><input type="number" name="btn_zoom_mod"></div>
+                  </div>
                 </div>
-              </div>
-            </details>
+              </details>
 
-            <details class="section">
-              <summary>Button → Fixture Actions</summary>
-              <div class="inner">
-                <p class="small muted">Define joystick button mappings (JSON).  
-                Supported <code>type</code> values: <b>toggle_fixture</b>, <b>enable_fixture</b>, <b>disable_fixture</b>, <b>toggle_group</b>.  
-                Optional <code>"mode":"hold"</code> for momentary press.</p>
+              <details class="section">
+                <summary>Button → Fixture Actions</summary>
+                <div class="inner">
+                  <p class="small muted">Define joystick button mappings (JSON).
+                  Supported <code>type</code> values: <b>toggle_fixture</b>, <b>enable_fixture</b>, <b>disable_fixture</b>, <b>toggle_group</b>.
+                  Optional <code>"mode":"hold"</code> for momentary press.</p>
 
-                <textarea name="button_actions" id="button_actions"
-                  style="width:100%;min-height:160px;border:1px solid #374151;
-                         border-radius:8px;padding:8px;background:#0b1020;
-                         color:#dfe7ff;font-family:ui-monospace,Consolas,monospace"></textarea>
+                  <textarea name="button_actions" id="button_actions"></textarea>
 
-                <pre style="white-space:pre-wrap;background:#0b1020;border:1px solid #374151;
-     border-radius:8px;padding:8px;margin-top:6px">
+                  <pre style="white-space:pre-wrap;background:#0b1020;border:1px solid #374151;border-radius:8px;padding:8px;margin-top:6px">
 Example:
 [
   {"button":7, "type":"toggle_fixture", "targets":["Left"]},
@@ -905,202 +932,242 @@ Example:
   {"button":9, "type":"toggle_group",   "targets":["Left","Right"]},
   {"button":10,"type":"enable_fixture", "targets":["Left","Right"], "mode":"hold"}
 ]
-                </pre>
-              </div>
-            </details>
-
-            <!-- Motion / Behavior -->
-            <details class="section" open>
-              <summary>Movement & Behavior</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div class="cbrow"><input type="checkbox" id="invert_pan" name="invert_pan"><label for="invert_pan">Invert Pan</label></div>
-                  <div class="cbrow"><input type="checkbox" id="invert_tilt" name="invert_tilt"><label for="invert_tilt">Invert Tilt</label></div>
-                  <div class="cbrow"><input type="checkbox" id="throttle_invert" name="throttle_invert"><label for="throttle_invert">Throttle Invert</label></div>
-
-                  <div><label>Deadband</label><input type="text" name="deadband"></div>
-                  <div><label>Expo</label><input type="text" name="expo"></div>
-                  <div><label>Speed</label><input type="number" name="speed"></div>
-
-                  <div><label>Pan Min</label><input type="number" name="pan_min"></div>
-                  <div><label>Pan Max</label><input type="number" name="pan_max"></div>
-                  <div><label>Tilt Min</label><input type="number" name="tilt_min"></div>
-                  <div><label>Tilt Max</label><input type="number" name="tilt_max"></div>
-
-                  <div><label>Fine Divisor</label><input type="number" name="fine_divisor"></div>
-                  <div><label>Flash10 Level</label><input type="number" name="flash10_level"></div>
+                  </pre>
                 </div>
-              </div>
-            </details>
+              </details>
 
-            <!-- Zoom Axis -->
-            <details class="section">
-              <summary>Zoom Axis (Rocker)</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div class="cbrow"><input type="checkbox" id="zoom_invert" name="zoom_invert"><label for="zoom_invert">Zoom Invert</label></div>
-                  <div><label>Zoom Deadband</label><input type="text" name="zoom_deadband" placeholder="0.0–0.2"></div>
-                  <div><label>Zoom Expo</label><input type="text" name="zoom_expo" placeholder="0.0–1.0"></div>
-                  <div><label>Zoom Speed</label><input type="number" name="zoom_speed" placeholder="e.g. 3000"></div>
+              <!-- Motion / Behavior -->
+              <details class="section" open>
+                <summary>Movement &amp; Behavior</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div class="cbrow"><input type="checkbox" id="invert_pan" name="invert_pan"><label for="invert_pan">Invert Pan</label></div>
+                    <div class="cbrow"><input type="checkbox" id="invert_tilt" name="invert_tilt"><label for="invert_tilt">Invert Tilt</label></div>
+                    <div class="cbrow"><input type="checkbox" id="throttle_invert" name="throttle_invert"><label for="throttle_invert">Throttle Invert</label></div>
+
+                    <div><label>Deadband</label><input type="text" name="deadband"></div>
+                    <div><label>Expo</label><input type="text" name="expo"></div>
+                    <div><label>Speed</label><input type="number" name="speed"></div>
+
+                    <div><label>Pan Min</label><input type="number" name="pan_min"></div>
+                    <div><label>Pan Max</label><input type="number" name="pan_max"></div>
+                    <div><label>Tilt Min</label><input type="number" name="tilt_min"></div>
+                    <div><label>Tilt Max</label><input type="number" name="tilt_max"></div>
+
+                    <div><label>Fine Divisor</label><input type="number" name="fine_divisor"></div>
+                    <div><label>Flash10 Level</label><input type="number" name="flash10_level"></div>
+                  </div>
                 </div>
-                <small class="muted">If AX Zoom ≥ 0, the rocker adjusts zoom incrementally and the value latches when released. “Zoom Mod” is ignored.</small>
-              </div>
-            </details>
+              </details>
 
-            <!-- GPIO LEDs -->
-            <details class="section">
-              <summary>GPIO LEDs (Raspberry Pi)</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div class="cbrow"><input type="checkbox" id="gpio_enabled" name="gpio_enabled"><label for="gpio_enabled">Enable GPIO LEDs</label></div>
-                  <div><label>GPIO Green Pin</label><input type="number" name="gpio_green_pin"></div>
-                  <div><label>GPIO Red Pin</label><input type="number" name="gpio_red_pin"></div>
-                  <div class="cbrow"><input type="checkbox" id="gpio_active_low" name="gpio_active_low"><label for="gpio_active_low">Active Low</label></div>
+              <!-- Zoom Axis -->
+              <details class="section">
+                <summary>Zoom Axis (Rocker)</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div class="cbrow"><input type="checkbox" id="zoom_invert" name="zoom_invert"><label for="zoom_invert">Zoom Invert</label></div>
+                    <div><label>Zoom Deadband</label><input type="text" name="zoom_deadband" placeholder="0.0–0.2"></div>
+                    <div><label>Zoom Expo</label><input type="text" name="zoom_expo" placeholder="0.0–1.0"></div>
+                    <div><label>Zoom Speed</label><input type="number" name="zoom_speed" placeholder="e.g. 3000"></div>
+                  </div>
+                  <small class="muted">If AX Zoom ≥ 0, the rocker adjusts zoom incrementally and the value latches when released. “Zoom Mod” is ignored.</small>
                 </div>
-              </div>
-            </details>
+              </details>
 
-            <!-- Virtual Joystick -->
-            <details class="section">
-              <summary>Virtual Joystick</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div class="cbrow"><input type="checkbox" id="virtual_joystick_enabled" name="virtual_joystick_enabled"><label for="virtual_joystick_enabled">Enable Virtual HOTAS</label></div>
-                  <div class="cbrow"><input type="checkbox" id="virtual_throttle_invert" name="virtual_throttle_invert"><label for="virtual_throttle_invert">Virtual Throttle Invert</label></div>
+              <!-- GPIO LEDs -->
+              <details class="section">
+                <summary>GPIO LEDs (Raspberry Pi)</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div class="cbrow"><input type="checkbox" id="gpio_enabled" name="gpio_enabled"><label for="gpio_enabled">Enable GPIO LEDs</label></div>
+                    <div><label>GPIO Green Pin</label><input type="number" name="gpio_green_pin"></div>
+                    <div><label>GPIO Red Pin</label><input type="number" name="gpio_red_pin"></div>
+                    <div class="cbrow"><input type="checkbox" id="gpio_active_low" name="gpio_active_low"><label for="gpio_active_low">Active Low</label></div>
+                  </div>
                 </div>
-              </div>
-            </details>
+              </details>
 
-            <!-- Debug -->
-            <details class="section">
-              <summary>Debug Logging</summary>
-              <div class="inner">
-                <div class="grid">
-                  <div class="cbrow"><input type="checkbox" id="debug_log_sacn" name="debug_log_sacn"><label for="debug_log_sacn">Log sACN Frames</label></div>
-                  <div><label>Debug Interval (ms)</label><input type="number" name="debug_log_interval_ms"></div>
-                  <div class="cbrow"><input type="checkbox" id="debug_log_only_changes" name="debug_log_only_changes"><label for="debug_log_only_changes">Only Log Changes</label></div>
-                  <div><label>Debug Mode</label><input type="text" name="debug_log_mode" placeholder="summary|nonzero|full"></div>
-                  <div><label>Nonzero Limit</label><input type="number" name="debug_log_nonzero_limit"></div>
+              <!-- Virtual Joystick -->
+              <details class="section">
+                <summary>Virtual Joystick</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div class="cbrow"><input type="checkbox" id="virtual_joystick_enabled" name="virtual_joystick_enabled"><label for="virtual_joystick_enabled">Enable Virtual HOTAS</label></div>
+                    <div class="cbrow"><input type="checkbox" id="virtual_throttle_invert" name="virtual_throttle_invert"><label for="virtual_throttle_invert">Virtual Throttle Invert</label></div>
+                  </div>
                 </div>
+              </details>
+
+              <!-- Debug -->
+              <details class="section">
+                <summary>Debug Logging</summary>
+                <div class="inner">
+                  <div class="grid">
+                    <div class="cbrow"><input type="checkbox" id="debug_log_sacn" name="debug_log_sacn"><label for="debug_log_sacn">Log sACN Frames</label></div>
+                    <div><label>Debug Interval (ms)</label><input type="number" name="debug_log_interval_ms"></div>
+                    <div class="cbrow"><input type="checkbox" id="debug_log_only_changes" name="debug_log_only_changes"><label for="debug_log_only_changes">Only Log Changes</label></div>
+                    <div><label>Debug Mode</label><input type="text" name="debug_log_mode" placeholder="summary|nonzero|full"></div>
+                    <div><label>Nonzero Limit</label><input type="number" name="debug_log_nonzero_limit"></div>
+                  </div>
+                </div>
+              </details>
+
+              <div class="form-actions">
+                <button class="btn primary" type="submit">Save Settings</button>
               </div>
-            </details>
-
-            <div style="margin-top:12px"><button class="btn" type="submit">Save Settings</button></div>
-          </form>
-        </div>
-
-        <div class="card" style="flex:1 1 100%">
-          <h3>Fixtures</h3>
-          <div class="switch" style="gap:12px;margin-bottom:8px">
-            <label>Multi-Universe Mode</label>
-            <input type="checkbox" id="multi-universe" onchange="toggleMU()">
-            <span class="small muted">(when off, all fixtures use Default Universe)</span>
+            </form>
           </div>
 
-          <div id="fixture-list"></div>
-
-        <h4 style="margin-top:16px">Add Fixture</h4>
-        <form id="fx-form" onsubmit="addFixture();return false;">
-          <div class="fxgrid">
-            <div><label>ID</label><input type="text" name="id" required></div>
-            <div class="cbrow"><input type="checkbox" id="fx_enabled" checked><label for="fx_enabled">Enabled</label></div>
-            <div><label>Universe</label><input type="number" name="universe"></div>
-            <div><label>Start Addr (info)</label><input type="number" name="start_addr"></div>
-
-            <div><label>Pan Coarse</label><input type="number" name="pan_coarse"></div>
-            <div><label>Pan Fine</label><input type="number" name="pan_fine"></div>
-            <div><label>Tilt Coarse</label><input type="number" name="tilt_coarse"></div>
-            <div><label>Tilt Fine</label><input type="number" name="tilt_fine"></div>
-
-            <div><label>Dimmer</label><input type="number" name="dimmer"></div>
-            <div><label>Zoom</label><input type="number" name="zoom"></div>
-            <div><label>Zoom Fine</label><input type="number" name="zoom_fine"></div>
-
-            <div><label>Color Temp Channel (DMX 11)</label><input type="number" name="color_temp_channel" value="11"></div>
-            <div><label>Color Temp Value</label><input type="number" name="color_temp_value" value="0" min="0" max="255"></div>
-
-            <div><label>Pan Bias</label><input type="number" name="pan_bias" value="0"></div>
-            <div><label>Tilt Bias</label><input type="number" name="tilt_bias" value="0"></div>
-
-            <div class="cbrow"><input type="checkbox" id="fx_invert_pan"><label for="fx_invert_pan">Invert Pan</label></div>
-            <div class="cbrow"><input type="checkbox" id="fx_invert_tilt"><label for="fx_invert_tilt">Invert Tilt</label></div>
-          </div>
-
-          <!-- hidden compat fields sent to backend -->
-          <input type="hidden" name="enabled" id="fx_enabled_hidden" value="True">
-          <input type="hidden" name="invert_pan" id="fx_invert_pan_hidden" value="False">
-          <input type="hidden" name="invert_tilt" id="fx_invert_tilt_hidden" value="False">
-
-          <div style="margin-top:12px">
-            <button class="btn" type="submit" onclick="syncFixtureCompat()">Add</button>
-          </div>
-        </form>
-
-        <div style="margin-top:16px" class="switch">
-          <a class="btn" href="/api/fixtures/export" target="_blank">Export CSV</a>
-          <button class="btn" onclick="showImport()">Import CSV</button>
-        </div>
-        <div id="import-area" style="display:none;margin-top:8px">
-          <textarea id="csvtext" placeholder="Paste CSV here..." style="width:100%;min-height:120px;border:1px solid #374151;border-radius:8px;padding:8px;background:#0b1020;color:#dfe7ff"></textarea>
-          <div class="switch"><button class="btn" onclick="doImport()">Import</button><button class="btn danger" onclick="hideImport()">Cancel</button></div>
-          <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
-        </div>
-
-        <!-- Virtual HOTAS -->
-        <div class="card" style="flex:1 1 100%">
-          <h3>Virtual HOTAS</h3>
-          <div class="switch" style="gap:12px;margin-bottom:8px">
-            <label>Enable</label>
-            <input type="checkbox" id="vjoy-en" onchange="vjoyEnable(this.checked)">
-            <small class="muted">Use this when hardware isn’t connected</small>
-          </div>
-
-          <div class="row" style="align-items:flex-start">
-            <!-- XY pad -->
-            <div style="flex:0 0 auto">
-              <div id="pad" style="position:relative;width:220px;height:220px;border:1px solid #374151;border-radius:12px;background:radial-gradient(circle at center, #1a1d25, #0f141e);">
-                <div id="pad-dot" style="position:absolute;width:18px;height:18px;border-radius:999px;border:2px solid #60a5fa;transform:translate(-50%,-50%);left:110px;top:110px;background:#0f1115"></div>
-              </div>
-              <div class="switch" style="justify-content:space-between;margin-top:6px">
-                <small class="muted">X: <span id="vx">0.00</span>  Y: <span id="vy">0.00</span></small>
-              </div>
+          <div class="card wide">
+            <h3>Fixtures</h3>
+            <div class="switch">
+              <label for="multi-universe">Multi-Universe Mode</label>
+              <input type="checkbox" id="multi-universe" onchange="toggleMU()">
+              <span class="small muted">When off, all fixtures use Default Universe</span>
             </div>
 
-            <!-- Throttle + Buttons + Zoom Rocker -->
-            <div style="flex:1">
-              <label>Dimmer</label>
-              <input type="range" id="vth" min="0" max="100" value="0" oninput="vjoyThrottle(this.value)" />
-              <small class="muted">When “Virtual Throttle Invert” is True: 0% = full (axis -1), 100% = empty (axis +1)</small>
+            <div id="fixture-list"></div>
 
-              <div style="margin-top:12px">
-                <label>Zoom Rocker</label>
-                <input type="range" id="vzoom" min="-100" max="100" value="0" oninput="vjoyZoom(this.value)" />
-                <small class="muted">Center = hold; push ± to adjust zoom (latches when released)</small>
-              </div>
+            <div class="subcard">
+              <h4>Add Fixture</h4>
+              <form id="fx-form" onsubmit="addFixture();return false;">
+                <div class="fxgrid">
+                  <div><label>ID</label><input type="text" name="id" required></div>
+                  <div class="cbrow"><input type="checkbox" id="fx_enabled" checked><label for="fx_enabled">Enabled</label></div>
+                  <div><label>Universe</label><input type="number" name="universe"></div>
+                  <div><label>Start Addr (info)</label><input type="number" name="start_addr"></div>
 
-              <div style="margin-top:12px">
-                <div class="switch" style="gap:8px;flex-wrap:wrap">
-                  <button class="btn" onpointerdown="vpress(BTN_ACTIVATE)" onpointerup="vrelease(BTN_ACTIVATE)">Activate</button>
-                  <button class="btn danger" onpointerdown="vpress(BTN_RELEASE)" onpointerup="vrelease(BTN_RELEASE)">Release</button>
-                  <button class="btn" onpointerdown="vpress(BTN_FLASH10)" onpointerup="vrelease(BTN_FLASH10)">Flash 10%</button>
-                  <button class="btn" onpointerdown="vpress(BTN_DIMOFF)" onpointerup="vrelease(BTN_DIMOFF)">Blackout</button>
-                  <button class="btn" onpointerdown="vpress(BTN_FINE)" onpointerup="vrelease(BTN_FINE)">Fine</button>
-                  <button class="btn" onpointerdown="vpress(BTN_ZOOM)" onpointerup="vrelease(BTN_ZOOM)">Zoom Mod</button>
+                  <div><label>Pan Coarse</label><input type="number" name="pan_coarse"></div>
+                  <div><label>Pan Fine</label><input type="number" name="pan_fine"></div>
+                  <div><label>Tilt Coarse</label><input type="number" name="tilt_coarse"></div>
+                  <div><label>Tilt Fine</label><input type="number" name="tilt_fine"></div>
+
+                  <div><label>Dimmer</label><input type="number" name="dimmer"></div>
+                  <div><label>Zoom</label><input type="number" name="zoom"></div>
+                  <div><label>Zoom Fine</label><input type="number" name="zoom_fine"></div>
+
+                  <div><label>Color Temp Channel (DMX 11)</label><input type="number" name="color_temp_channel" value="11"></div>
+                  <div><label>Color Temp Value</label><input type="number" name="color_temp_value" value="0" min="0" max="255"></div>
+
+                  <div><label>Pan Bias</label><input type="number" name="pan_bias" value="0"></div>
+                  <div><label>Tilt Bias</label><input type="number" name="tilt_bias" value="0"></div>
+
+                  <div class="cbrow"><input type="checkbox" id="fx_invert_pan"><label for="fx_invert_pan">Invert Pan</label></div>
+                  <div class="cbrow"><input type="checkbox" id="fx_invert_tilt"><label for="fx_invert_tilt">Invert Tilt</label></div>
                 </div>
-                <small class="muted">If AX Zoom is set, “Zoom Mod” is ignored (rocker controls zoom incrementally).</small>
+
+                <!-- hidden compat fields sent to backend -->
+                <input type="hidden" name="enabled" id="fx_enabled_hidden" value="True">
+                <input type="hidden" name="invert_pan" id="fx_invert_pan_hidden" value="False">
+                <input type="hidden" name="invert_tilt" id="fx_invert_tilt_hidden" value="False">
+
+                <div class="form-actions">
+                  <button class="btn primary" type="submit">Add Fixture</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="subcard">
+              <h4>Import &amp; Export</h4>
+              <div class="form-actions">
+                <a class="btn" href="/api/fixtures/export" target="_blank">Export CSV</a>
+                <button class="btn" type="button" onclick="showImport()">Import CSV</button>
+              </div>
+              <div id="import-area" style="display:none">
+                <textarea id="csvtext" placeholder="Paste CSV here..."></textarea>
+                <div class="form-actions">
+                  <button class="btn primary" type="button" onclick="doImport()">Import</button>
+                  <button class="btn danger" type="button" onclick="hideImport()">Cancel</button>
+                </div>
+                <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
               </div>
             </div>
           </div>
         </div>
+      </section>
 
-        <div class="card" style="flex:1 1 100%">
-          <h3>Logs</h3>
-          <textarea id="logs" readonly></textarea>
+      <section class="tab-panel" data-tab="usability">
+        <div class="panel-grid">
+          <div class="card wide">
+            <h3>Virtual HOTAS</h3>
+            <div class="switch">
+              <label for="vjoy-en">Enable</label>
+              <input type="checkbox" id="vjoy-en" onchange="vjoyEnable(this.checked)">
+              <small class="muted">Use this when hardware isn’t connected</small>
+            </div>
+
+            <div class="virtual-layout">
+              <div class="virtual-pad">
+                <div id="pad" style="position:relative;width:220px;height:220px;border:1px solid #374151;border-radius:12px;background:radial-gradient(circle at center, #1a1d25, #0f141e);">
+                  <div id="pad-dot" style="position:absolute;width:18px;height:18px;border-radius:999px;border:2px solid #60a5fa;transform:translate(-50%,-50%);left:110px;top:110px;background:#0f1115"></div>
+                </div>
+                <div class="switch" style="justify-content:space-between;margin-top:6px">
+                  <small class="muted">X: <span id="vx">0.00</span>  Y: <span id="vy">0.00</span></small>
+                </div>
+              </div>
+
+              <div class="virtual-controls">
+                <label>Dimmer</label>
+                <input type="range" id="vth" min="0" max="100" value="0" oninput="vjoyThrottle(this.value)" />
+                <small class="muted">When “Virtual Throttle Invert” is True: 0% = full (axis -1), 100% = empty (axis +1)</small>
+
+                <div style="margin-top:12px">
+                  <label>Zoom Rocker</label>
+                  <input type="range" id="vzoom" min="-100" max="100" value="0" oninput="vjoyZoom(this.value)" />
+                  <small class="muted">Center = hold; push ± to adjust zoom (latches when released)</small>
+                </div>
+
+                <div style="margin-top:12px">
+                  <div class="switch" style="gap:8px;flex-wrap:wrap">
+                    <button class="btn" onpointerdown="vpress(BTN_ACTIVATE)" onpointerup="vrelease(BTN_ACTIVATE)">Activate</button>
+                    <button class="btn danger" onpointerdown="vpress(BTN_RELEASE)" onpointerup="vrelease(BTN_RELEASE)">Release</button>
+                    <button class="btn" onpointerdown="vpress(BTN_FLASH10)" onpointerup="vrelease(BTN_FLASH10)">Flash 10%</button>
+                    <button class="btn" onpointerdown="vpress(BTN_DIMOFF)" onpointerup="vrelease(BTN_DIMOFF)">Blackout</button>
+                    <button class="btn" onpointerdown="vpress(BTN_FINE)" onpointerup="vrelease(BTN_FINE)">Fine</button>
+                    <button class="btn" onpointerdown="vpress(BTN_ZOOM)" onpointerup="vrelease(BTN_ZOOM)">Zoom Mod</button>
+                  </div>
+                  <small class="muted">If AX Zoom is set, “Zoom Mod” is ignored (rocker controls zoom incrementally).</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card wide">
+            <h3>Logs</h3>
+            <textarea id="logs" readonly></textarea>
+          </div>
         </div>
-      </div>
+      </section>
 
     <script>
     async function fetchJSON(url, opts){ const r = await fetch(url, opts); const ct = r.headers.get('content-type')||''; if(!r.ok) throw new Error(await r.text()); return ct.includes('application/json') ? await r.json() : await r.text(); }
+
+    const TAB_STORAGE_KEY = 'td.activeTab';
+
+    function setActiveTab(tab){
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.tab === tab);
+      });
+      try{ localStorage.setItem(TAB_STORAGE_KEY, tab); }catch(_){ }
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+    });
+
+    (function initTab(){
+      let initial = 'dashboard';
+      try{
+        const stored = localStorage.getItem(TAB_STORAGE_KEY);
+        if(stored && document.querySelector(`.tab-btn[data-tab="${stored}"]`)){
+          initial = stored;
+        }
+      }catch(_){ }
+      setActiveTab(initial);
+    })();
 
     function setPill(id, ok, off=false){
       const el = document.getElementById(id);
@@ -1202,42 +1269,37 @@ Example:
       if(!data.fixtures.length){ wrap.innerHTML = '<small>No fixtures yet.</small>'; return; }
       for(const f of data.fixtures){
         const card = document.createElement('div');
-        card.className = 'card';
-        card.style.marginBottom = '10px';
+        card.className = 'fixture-card';
         card.innerHTML = `
-          <div class="row" style="align-items:flex-start">
-            <div style="flex:1">
-              <b>${f.id}</b> ${f.enabled ? '<span class="badge ok">Enabled</span>' : '<span class="badge warn">Disabled</span>'}
-              <div class="small muted">Uni ${f.universe} • Pan ${f.pan_coarse}/${f.pan_fine||0} • Tilt ${f.tilt_coarse}/${f.tilt_fine||0} • Dim ${f.dimmer||0} • Zoom ${f.zoom||0}${f.zoom_fine?('/'+f.zoom_fine):''}${colorTempSummary(f)}</div>
-              <div class="small muted">Invert P:${f.invert_pan? 'Y':'N'} T:${f.invert_tilt? 'Y':'N'} • Bias P:${f.pan_bias||0} T:${f.tilt_bias||0}</div>
-              <details style="margin-top:8px">
-                <summary>Edit</summary>
-                <div class="fxgrid" style="margin-top:8px">
-                  ${editInput('Enabled','enabled',f.enabled)}
-                  ${editInput('Universe','universe',f.universe,'number')}
-                  ${editInput('Start Addr','start_addr',f.start_addr,'number')}
-                  ${editInput('Pan Coarse','pan_coarse',f.pan_coarse,'number')}
-                  ${editInput('Pan Fine','pan_fine',f.pan_fine,'number')}
-                  ${editInput('Tilt Coarse','tilt_coarse',f.tilt_coarse,'number')}
-                  ${editInput('Tilt Fine','tilt_fine',f.tilt_fine,'number')}
-                  ${editInput('Dimmer','dimmer',f.dimmer,'number')}
-                  ${editInput('Zoom','zoom',f.zoom,'number')}
-                  ${editInput('Zoom Fine','zoom_fine',f.zoom_fine,'number')}
-                  ${editInput('Color Temp Ch','color_temp_channel',f.color_temp_channel,'number')}
-                  ${editInput('Color Temp Val','color_temp_value',f.color_temp_value,'number')}
-                  ${editInput('Invert Pan','invert_pan',f.invert_pan)}
-                  ${editInput('Invert Tilt','invert_tilt',f.invert_tilt)}
-                  ${editInput('Pan Bias','pan_bias',f.pan_bias,'number')}
-                  ${editInput('Tilt Bias','tilt_bias',f.tilt_bias,'number')}
-                </div>
-                <div class="switch" style="margin-top:8px">
-                  <button class="btn" onclick="saveFixture('${f.id}', this.parentElement.previousElementSibling)">Save</button>
-                  <button class="btn" onclick="toggleFixture('${f.id}', ${!f.enabled})">${f.enabled?'Disable':'Enable'}</button>
-                  <button class="btn danger" onclick="deleteFixture('${f.id}')">Delete</button>
-                </div>
-              </details>
+          <div><b>${f.id}</b> ${f.enabled ? '<span class="badge ok">Enabled</span>' : '<span class="badge warn">Disabled</span>'}</div>
+          <div class="small muted">Uni ${f.universe} • Pan ${f.pan_coarse}/${f.pan_fine||0} • Tilt ${f.tilt_coarse}/${f.tilt_fine||0} • Dim ${f.dimmer||0} • Zoom ${f.zoom||0}${f.zoom_fine?('/'+f.zoom_fine):''}${colorTempSummary(f)}</div>
+          <div class="small muted">Invert P:${f.invert_pan? 'Y':'N'} T:${f.invert_tilt? 'Y':'N'} • Bias P:${f.pan_bias||0} T:${f.tilt_bias||0}</div>
+          <details class="fixture-details">
+            <summary>Edit</summary>
+            <div class="fxgrid">
+              ${editInput('Enabled','enabled',f.enabled)}
+              ${editInput('Universe','universe',f.universe,'number')}
+              ${editInput('Start Addr','start_addr',f.start_addr,'number')}
+              ${editInput('Pan Coarse','pan_coarse',f.pan_coarse,'number')}
+              ${editInput('Pan Fine','pan_fine',f.pan_fine,'number')}
+              ${editInput('Tilt Coarse','tilt_coarse',f.tilt_coarse,'number')}
+              ${editInput('Tilt Fine','tilt_fine',f.tilt_fine,'number')}
+              ${editInput('Dimmer','dimmer',f.dimmer,'number')}
+              ${editInput('Zoom','zoom',f.zoom,'number')}
+              ${editInput('Zoom Fine','zoom_fine',f.zoom_fine,'number')}
+              ${editInput('Color Temp Ch','color_temp_channel',f.color_temp_channel,'number')}
+              ${editInput('Color Temp Val','color_temp_value',f.color_temp_value,'number')}
+              ${editInput('Invert Pan','invert_pan',f.invert_pan)}
+              ${editInput('Invert Tilt','invert_tilt',f.invert_tilt)}
+              ${editInput('Pan Bias','pan_bias',f.pan_bias,'number')}
+              ${editInput('Tilt Bias','tilt_bias',f.tilt_bias,'number')}
             </div>
-          </div>`;
+            <div class="form-actions">
+              <button class="btn primary" onclick="saveFixture('${f.id}', this.closest('.form-actions').previousElementSibling)">Save</button>
+              <button class="btn" onclick="toggleFixture('${f.id}', ${!f.enabled})">${f.enabled?'Disable':'Enable'}</button>
+              <button class="btn danger" onclick="deleteFixture('${f.id}')">Delete</button>
+            </div>
+          </details>`;
         wrap.appendChild(card);
       }
     }
