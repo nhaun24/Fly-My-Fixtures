@@ -92,6 +92,9 @@ DEFAULTS = {
     "debug_log_mode": "summary",       # summary | nonzero | full
     "debug_log_nonzero_limit": 64,     # max pairs in nonzero mode (0=all)
 
+    # --- Controller debug ---
+    "debug_controller_buttons": False,
+
     # --- Dedicated Zoom Axis (rocker) ---
     "ax_zoom": -1,           # set to the rocker’s axis index; -1 disables (uses legacy zoom-mod)
     "zoom_invert": False,    # invert the rocker direction
@@ -541,6 +544,7 @@ class SenderThread(threading.Thread):
         self.dimmer = 0
         self.zoom_val = 0
         self._btn_prev = {}   # index -> 0/1 for edge detection
+        self._debug_prev_buttons = None
 
     def start_sender(self):
         if self.sender:
@@ -595,6 +599,63 @@ class SenderThread(threading.Thread):
         except Exception:
             return 0
 
+    def _collect_button_states(self):
+        states = {}
+        if settings.get("virtual_joystick_enabled", False) or not self.js:
+            for k, v in virtual_state["buttons"].items():
+                try:
+                    idx = int(k)
+                except Exception:
+                    continue
+                try:
+                    states[idx] = 1 if int(v) else 0
+                except Exception:
+                    states[idx] = 0
+            return states
+        try:
+            count = self.js.get_numbuttons()
+        except Exception:
+            count = 0
+        for idx in range(count):
+            try:
+                states[idx] = 1 if self.js.get_button(idx) else 0
+            except Exception:
+                states[idx] = 0
+        return states
+
+    def _maybe_log_button_debug(self):
+        if not settings.get("debug_controller_buttons", False):
+            self._debug_prev_buttons = None
+            return
+
+        states = self._collect_button_states()
+        prev = self._debug_prev_buttons
+        if prev is not None and states == prev:
+            return
+
+        pressed = [str(i) for i, v in sorted(states.items()) if v]
+        message = f"Controller debug: pressed [{', '.join(pressed) if pressed else 'none'}]"
+
+        if prev is None:
+            count = len(states)
+            if count:
+                message += f"; tracking {count} buttons"
+            else:
+                message += "; no buttons detected"
+        else:
+            changes = []
+            keys = sorted(set(states.keys()) | set(prev.keys()))
+            for idx in keys:
+                cur = states.get(idx, 0)
+                before = prev.get(idx, 0)
+                if cur != before:
+                    changes.append(f"{idx}:{'DOWN' if cur else 'UP'}")
+            if changes:
+                message += f"; changes: {', '.join(changes)}"
+
+        log(message)
+        self._debug_prev_buttons = dict(states)
+
     def run(self):
         pygame.init()
         clock = pygame.time.Clock()
@@ -634,6 +695,8 @@ class SenderThread(threading.Thread):
                             continue
 
                 pygame.event.pump()
+
+                self._maybe_log_button_debug()
 
                 # edges (debounce ~150ms)
                 now = time.time()
@@ -1058,6 +1121,7 @@ Example:
                 <div class="inner">
                   <div class="grid">
                     <div class="cbrow"><input type="checkbox" id="debug_log_sacn" name="debug_log_sacn"><label for="debug_log_sacn">Log sACN Frames</label></div>
+                    <div class="cbrow"><input type="checkbox" id="debug_controller_buttons" name="debug_controller_buttons"><label for="debug_controller_buttons">Controller Button Debug</label></div>
                     <div><label>Debug Interval (ms)</label><input type="number" name="debug_log_interval_ms"></div>
                     <div class="cbrow"><input type="checkbox" id="debug_log_only_changes" name="debug_log_only_changes"><label for="debug_log_only_changes">Only Log Changes</label></div>
                     <div><label>Debug Mode</label><input type="text" name="debug_log_mode" placeholder="summary|nonzero|full"></div>
