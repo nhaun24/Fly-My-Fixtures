@@ -793,8 +793,10 @@ INDEX_HTML = """
      .card{flex:1 1 320px;border:1px solid #2f3541;border-radius:14px;padding:20px;background:#111827;box-shadow:0 4px 16px rgba(8,10,20,.35)}
      .card.wide{flex-basis:100%}
      label{display:block;font-size:14px;font-weight:600;color:#f3f4f6}
-     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;align-items:start}
-     .grid > div{display:flex;flex-direction:column;gap:6px}
+     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;align-items:start}
+     .grid > div{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:12px;background:#0f141d;border:1px solid #2b3140}
+     .grid > .cbrow{flex-direction:row;align-items:center;gap:10px;margin-top:0;padding:14px}
+     .grid > .cbrow label{margin:0}
      input[type=number],input[type=text],select{width:100%;padding:10px 12px;border:1px solid #303845;border-radius:10px;background:#1a1d25;color:#e5e7eb;font-size:14px;transition:border-color .15s ease,box-shadow .15s ease}
      input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
      input[type=checkbox]{width:auto;height:auto;accent-color:#2563eb}
@@ -832,7 +834,10 @@ INDEX_HTML = """
      details.section > summary{cursor:pointer;padding:12px 14px;background:#101826;font-weight:600;border-bottom:1px solid #2f3541;list-style:none}
      details.section[open] > summary{background:#142033}
      details.section > .inner{padding:14px}
-     .fxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;align-items:start}
+     .fxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px;align-items:start}
+     .fxgrid > div{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:12px;background:#0f141d;border:1px solid #2b3140}
+     .fxgrid > .cbrow{flex-direction:row;align-items:center;gap:10px;margin-top:0;padding:14px}
+     .fxgrid > .cbrow label{margin:0}
      .fixture-card{border:1px solid #2f3541;border-radius:12px;padding:16px;background:#101826;display:flex;flex-direction:column;gap:8px}
      .fixture-card details{background:#0f141d;border-radius:10px;border:1px solid #2b3140;padding:0}
      .fixture-card details > summary{padding:10px 14px;cursor:pointer;font-weight:600}
@@ -860,7 +865,6 @@ INDEX_HTML = """
       <div class="tabbar" role="tablist">
         <button type="button" class="tab-btn active" data-tab="dashboard">Dashboard</button>
         <button type="button" class="tab-btn" data-tab="settings">Settings</button>
-        <button type="button" class="tab-btn" data-tab="usability">Usability &amp; Logs</button>
       </div>
 
       <section class="tab-panel active" data-tab="dashboard">
@@ -873,6 +877,55 @@ INDEX_HTML = """
             </div>
             <p class="small muted">Joystick: <span id="joy-name">-</span> • Axes: <span id="joy-axes">0</span> • Buttons: <span id="joy-buttons">0</span></p>
             <p class="small muted">Last frame: <span id="last-frame">-</span></p>
+          </div>
+
+          <div class="card wide">
+            <h3>Virtual HOTAS</h3>
+            <div class="switch">
+              <label for="vjoy-en">Enable</label>
+              <input type="checkbox" id="vjoy-en" onchange="vjoyEnable(this.checked)">
+              <small class="muted">Use this when hardware isn’t connected</small>
+            </div>
+
+            <div class="virtual-layout">
+              <div class="virtual-pad">
+                <div id="pad" style="position:relative;width:220px;height:220px;border:1px solid #374151;border-radius:12px;background:radial-gradient(circle at center, #1a1d25, #0f141e);">
+                  <div id="pad-dot" style="position:absolute;width:18px;height:18px;border-radius:999px;border:2px solid #60a5fa;transform:translate(-50%,-50%);left:110px;top:110px;background:#0f1115"></div>
+                </div>
+                <div class="switch" style="justify-content:space-between;margin-top:6px">
+                  <small class="muted">X: <span id="vx">0.00</span>  Y: <span id="vy">0.00</span></small>
+                </div>
+              </div>
+
+              <div class="virtual-controls">
+                <label>Dimmer</label>
+                <input type="range" id="vth" min="0" max="100" value="0" oninput="vjoyThrottle(this.value)" />
+                <small class="muted">When “Virtual Throttle Invert” is True: 0% = full (axis -1), 100% = empty (axis +1)</small>
+
+                <div style="margin-top:12px">
+                  <label>Zoom Rocker</label>
+                  <input type="range" id="vzoom" min="-100" max="100" value="0" oninput="vjoyZoom(this.value)" />
+                  <small class="muted">Center = hold; push ± to adjust zoom (latches when released)</small>
+                </div>
+
+                <div style="margin-top:12px">
+                  <div class="switch" style="gap:8px;flex-wrap:wrap">
+                    <button class="btn" onpointerdown="vpress(BTN_ACTIVATE)" onpointerup="vrelease(BTN_ACTIVATE)">Activate</button>
+                    <button class="btn danger" onpointerdown="vpress(BTN_RELEASE)" onpointerup="vrelease(BTN_RELEASE)">Release</button>
+                    <button class="btn" onpointerdown="vpress(BTN_FLASH10)" onpointerup="vrelease(BTN_FLASH10)">Flash 10%</button>
+                    <button class="btn" onpointerdown="vpress(BTN_DIMOFF)" onpointerup="vrelease(BTN_DIMOFF)">Blackout</button>
+                    <button class="btn" onpointerdown="vpress(BTN_FINE)" onpointerup="vrelease(BTN_FINE)">Fine</button>
+                    <button class="btn" onpointerdown="vpress(BTN_ZOOM)" onpointerup="vrelease(BTN_ZOOM)">Zoom Mod</button>
+                  </div>
+                  <small class="muted">If AX Zoom is set, “Zoom Mod” is ignored (rocker controls zoom incrementally).</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card wide">
+            <h3>Logs</h3>
+            <textarea id="logs" readonly></textarea>
           </div>
         </div>
       </section>
@@ -1082,59 +1135,6 @@ Example:
                 <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="tab-panel" data-tab="usability">
-        <div class="panel-grid">
-          <div class="card wide">
-            <h3>Virtual HOTAS</h3>
-            <div class="switch">
-              <label for="vjoy-en">Enable</label>
-              <input type="checkbox" id="vjoy-en" onchange="vjoyEnable(this.checked)">
-              <small class="muted">Use this when hardware isn’t connected</small>
-            </div>
-
-            <div class="virtual-layout">
-              <div class="virtual-pad">
-                <div id="pad" style="position:relative;width:220px;height:220px;border:1px solid #374151;border-radius:12px;background:radial-gradient(circle at center, #1a1d25, #0f141e);">
-                  <div id="pad-dot" style="position:absolute;width:18px;height:18px;border-radius:999px;border:2px solid #60a5fa;transform:translate(-50%,-50%);left:110px;top:110px;background:#0f1115"></div>
-                </div>
-                <div class="switch" style="justify-content:space-between;margin-top:6px">
-                  <small class="muted">X: <span id="vx">0.00</span>  Y: <span id="vy">0.00</span></small>
-                </div>
-              </div>
-
-              <div class="virtual-controls">
-                <label>Dimmer</label>
-                <input type="range" id="vth" min="0" max="100" value="0" oninput="vjoyThrottle(this.value)" />
-                <small class="muted">When “Virtual Throttle Invert” is True: 0% = full (axis -1), 100% = empty (axis +1)</small>
-
-                <div style="margin-top:12px">
-                  <label>Zoom Rocker</label>
-                  <input type="range" id="vzoom" min="-100" max="100" value="0" oninput="vjoyZoom(this.value)" />
-                  <small class="muted">Center = hold; push ± to adjust zoom (latches when released)</small>
-                </div>
-
-                <div style="margin-top:12px">
-                  <div class="switch" style="gap:8px;flex-wrap:wrap">
-                    <button class="btn" onpointerdown="vpress(BTN_ACTIVATE)" onpointerup="vrelease(BTN_ACTIVATE)">Activate</button>
-                    <button class="btn danger" onpointerdown="vpress(BTN_RELEASE)" onpointerup="vrelease(BTN_RELEASE)">Release</button>
-                    <button class="btn" onpointerdown="vpress(BTN_FLASH10)" onpointerup="vrelease(BTN_FLASH10)">Flash 10%</button>
-                    <button class="btn" onpointerdown="vpress(BTN_DIMOFF)" onpointerup="vrelease(BTN_DIMOFF)">Blackout</button>
-                    <button class="btn" onpointerdown="vpress(BTN_FINE)" onpointerup="vrelease(BTN_FINE)">Fine</button>
-                    <button class="btn" onpointerdown="vpress(BTN_ZOOM)" onpointerup="vrelease(BTN_ZOOM)">Zoom Mod</button>
-                  </div>
-                  <small class="muted">If AX Zoom is set, “Zoom Mod” is ignored (rocker controls zoom incrementally).</small>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card wide">
-            <h3>Logs</h3>
-            <textarea id="logs" readonly></textarea>
           </div>
         </div>
       </section>
