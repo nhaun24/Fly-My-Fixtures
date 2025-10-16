@@ -785,6 +785,7 @@ INDEX_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
      :root{color-scheme:dark}
+     *,*::before,*::after{box-sizing:border-box}
      body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,Arial,sans-serif;max-width:1100px;margin:24px auto;padding:0 12px;background:#0f1115;color:#e5e7eb;line-height:1.45}
      h1{margin-bottom:6px}
      h3{margin:0 0 12px}
