@@ -76,6 +76,8 @@ DEFAULTS = {
     "multi_universe_enabled": False,   # start single-universe; fan-out when enabled
     "default_universe": 1,             # used if MU disabled and as default for new fixtures
 
+    "button_actions": [],  # e.g. [{"button":7,"type":"toggle_fixture","targets":["Left"]}]
+
     # Fixtures list (editable in UI)
     "fixtures": [],
 
@@ -175,6 +177,29 @@ def maybe_load_fixtures_csv_into_settings():
             settings["fixtures"] = fixtures
     except Exception:
         pass
+
+def set_fixture_enabled_by_id(fid: str, enabled: bool) -> bool:
+    changed = False
+    arr = settings.get("fixtures", [])
+    for f in arr:
+        if str(f.get("id","")) == str(fid):
+            if bool(f.get("enabled", False)) != bool(enabled):
+                f["enabled"] = bool(enabled)
+                changed = True
+    if changed:
+        save_settings()
+        log(f"Fixture {'ENABLED' if enabled else 'DISABLED'}: {fid}")
+    return changed
+
+def toggle_fixture_by_id(fid: str) -> bool:
+    arr = settings.get("fixtures", [])
+    for f in arr:
+        if str(f.get("id","")) == str(fid):
+            f["enabled"] = not bool(f.get("enabled", False))
+            save_settings()
+            log(f"Fixture toggled ({'EN' if f['enabled'] else 'DIS'}): {fid}")
+            return True
+    return False
 
 def load_settings():
     global settings
@@ -476,7 +501,11 @@ def normalize_types(d):
             try: out[k] = float(str(v))
             except: out[k] = settings.get(k, default)
         elif isinstance(default, list):
-            out[k] = settings.get(k, default)
+            # allow JSON text from the web form
+            try:
+                out[k] = json.loads(v) if isinstance(v, str) else list(v)
+            except Exception:
+                out[k] = settings.get(k, default)
         else:
             out[k] = str(v)
     return out
@@ -511,6 +540,7 @@ class SenderThread(threading.Thread):
         self.tilt_pos = 0
         self.dimmer = 0
         self.zoom_val = 0
+        self._btn_prev = {}   # index -> 0/1 for edge detection
 
     def start_sender(self):
         if self.sender:
@@ -607,6 +637,55 @@ class SenderThread(threading.Thread):
 
                 # edges (debounce ~150ms)
                 now = time.time()
+                # ---- Button actions (rising/falling edges) ----
+                actions = settings.get("button_actions", []) or []
+                for act in actions:
+                    try:
+                        bidx = int(act.get("button", -1))
+                    except Exception:
+                        bidx = -1
+                    if bidx < 0:
+                        continue
+
+                    cur = 1 if self.btn(bidx) else 0
+                    prev = self._btn_prev.get(bidx, 0)
+                    self._btn_prev[bidx] = cur
+
+                    mode = str(act.get("mode", "toggle")).lower()  # 'toggle' or 'hold'
+                    atype = str(act.get("type", "")).lower()       # 'toggle_fixture','enable_fixture','disable_fixture','toggle_group'
+                    targets = act.get("targets", [])
+                    if isinstance(targets, str):
+                        targets = [targets]
+
+                    # Rising edge
+                    if cur == 1 and prev == 0:
+                        if mode == "toggle":
+                            if atype == "toggle_fixture":
+                                for fid in targets:
+                                    toggle_fixture_by_id(fid)
+                            elif atype == "enable_fixture":
+                                for fid in targets:
+                                    set_fixture_enabled_by_id(fid, True)
+                            elif atype == "disable_fixture":
+                                for fid in targets:
+                                    set_fixture_enabled_by_id(fid, False)
+                            elif atype == "toggle_group":
+                                for fid in targets:
+                                    toggle_fixture_by_id(fid)
+                        elif mode == "hold":
+                            if atype in ("toggle_fixture", "enable_fixture", "toggle_group"):
+                                for fid in targets:
+                                    set_fixture_enabled_by_id(fid, True)
+                            elif atype == "disable_fixture":
+                                for fid in targets:
+                                    set_fixture_enabled_by_id(fid, False)
+
+                    # Falling edge (for momentary)
+                    if cur == 0 and prev == 1 and mode == "hold":
+                        if atype in ("toggle_fixture", "enable_fixture", "toggle_group"):
+                            for fid in targets:
+                                set_fixture_enabled_by_id(fid, False)
+
                 if self.btn(settings["btn_activate"]) and now-last_activate>0.15 and not status["active"]:
                     with state_lock:
                         self.start_sender()
@@ -802,6 +881,31 @@ INDEX_HTML = """
                   <div><label>BTN Fine</label><input type="number" name="btn_fine"></div>
                   <div><label>BTN Zoom Mod</label><input type="number" name="btn_zoom_mod"></div>
                 </div>
+              </div>
+            </details>
+
+            <details class="section">
+              <summary>Button → Fixture Actions</summary>
+              <div class="inner">
+                <p class="small muted">Define joystick button mappings (JSON).  
+                Supported <code>type</code> values: <b>toggle_fixture</b>, <b>enable_fixture</b>, <b>disable_fixture</b>, <b>toggle_group</b>.  
+                Optional <code>"mode":"hold"</code> for momentary press.</p>
+
+                <textarea name="button_actions" id="button_actions"
+                  style="width:100%;min-height:160px;border:1px solid #374151;
+                         border-radius:8px;padding:8px;background:#0b1020;
+                         color:#dfe7ff;font-family:ui-monospace,Consolas,monospace"></textarea>
+
+                <pre style="white-space:pre-wrap;background:#0b1020;border:1px solid #374151;
+     border-radius:8px;padding:8px;margin-top:6px">
+Example:
+[
+  {"button":7, "type":"toggle_fixture", "targets":["Left"]},
+  {"button":8, "type":"toggle_fixture", "targets":["Right"]},
+  {"button":9, "type":"toggle_group",   "targets":["Left","Right"]},
+  {"button":10,"type":"enable_fixture", "targets":["Left","Right"], "mode":"hold"}
+]
+                </pre>
               </div>
             </details>
 
@@ -1035,6 +1139,13 @@ INDEX_HTML = """
           el.checked = !!data[k];
         }else{
           el.value = data[k];
+        }
+      }
+      if(form["button_actions"]){
+        try{
+          form["button_actions"].value = JSON.stringify(data.button_actions || [], null, 2);
+        }catch{
+          form["button_actions"].value = "[]";
         }
       }
       // sync virtual throttle invert flag into the slider
