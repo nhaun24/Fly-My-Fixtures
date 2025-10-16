@@ -81,6 +81,7 @@
   "virtual_joystick_enabled": true,
   "virtual_throttle_invert": true,
   "debug_log_sacn": false,
+  "debug_controller_buttons": false,
   "debug_log_interval_ms": 500,
   "debug_log_only_changes": true,
   "debug_log_mode": "summary",
