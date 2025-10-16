@@ -545,6 +545,7 @@ class SenderThread(threading.Thread):
         self.zoom_val = 0
         self._btn_prev = {}   # index -> 0/1 for edge detection
         self._debug_prev_buttons = None
+        self._debug_prev_axes = None
 
     def start_sender(self):
         if self.sender:
@@ -623,14 +624,61 @@ class SenderThread(threading.Thread):
                 states[idx] = 0
         return states
 
+    def _collect_axis_states(self):
+        axes = []
+        mapping = [
+            ("pan", settings.get("ax_pan", 0)),
+            ("tilt", settings.get("ax_tilt", 1)),
+            ("throttle", settings.get("ax_throt", 2)),
+        ]
+
+        try:
+            zoom_idx = int(settings.get("ax_zoom", -1))
+        except Exception:
+            zoom_idx = -1
+        if zoom_idx >= 0:
+            mapping.append(("zoom", zoom_idx))
+
+        for label, raw_idx in mapping:
+            try:
+                idx = int(raw_idx)
+            except Exception:
+                continue
+            if idx < 0:
+                continue
+            try:
+                val = float(self.axis(idx))
+            except Exception:
+                val = 0.0
+            axes.append((label, max(-1.0, min(1.0, val))))
+        return axes
+
     def _maybe_log_button_debug(self):
         if not settings.get("debug_controller_buttons", False):
             self._debug_prev_buttons = None
+            self._debug_prev_axes = None
             return
 
         states = self._collect_button_states()
+        axis_states = self._collect_axis_states()
         prev = self._debug_prev_buttons
-        if prev is not None and states == prev:
+        prev_axes = self._debug_prev_axes
+
+        def axes_changed(previous, current):
+            if previous is None:
+                return True
+            if set(previous.keys()) != set(current.keys()):
+                return True
+            for key, value in current.items():
+                if key not in previous:
+                    return True
+                if abs(previous[key] - value) >= 0.01:
+                    return True
+            return False
+
+        axis_dict = {label: value for label, value in axis_states}
+
+        if prev is not None and states == prev and not axes_changed(prev_axes, axis_dict):
             return
 
         pressed = [str(i) for i, v in sorted(states.items()) if v]
@@ -642,6 +690,8 @@ class SenderThread(threading.Thread):
                 message += f"; tracking {count} buttons"
             else:
                 message += "; no buttons detected"
+            if axis_states:
+                message += f"; tracking axes: {', '.join(label for label, _ in axis_states)}"
         else:
             changes = []
             keys = sorted(set(states.keys()) | set(prev.keys()))
@@ -653,8 +703,13 @@ class SenderThread(threading.Thread):
             if changes:
                 message += f"; changes: {', '.join(changes)}"
 
+        if axis_states:
+            axis_summary = ", ".join(f"{label}={value:+.2f}" for label, value in axis_states)
+            message += f"; axes: {axis_summary}"
+
         log(message)
         self._debug_prev_buttons = dict(states)
+        self._debug_prev_axes = dict(axis_dict)
 
     def run(self):
         pygame.init()
