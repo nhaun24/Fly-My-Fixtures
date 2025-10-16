@@ -1477,6 +1477,43 @@ Example:
       setPadDot(0, 0);
     })();
 
+    (() => {
+      const zoom = document.getElementById('vzoom');
+      if(!zoom) return;
+
+      let engaged = false;
+      let pointerId = null;
+
+      const centerZoom = () => {
+        if(!engaged) return;
+        engaged = false;
+        if(pointerId !== null){
+          try{ zoom.releasePointerCapture(pointerId); }catch(_){ }
+          pointerId = null;
+        }
+        zoom.value = '0';
+        vjoyZoom(0);
+      };
+
+      zoom.addEventListener('pointerdown', ev => {
+        engaged = true;
+        pointerId = ev.pointerId;
+        try{ zoom.setPointerCapture(pointerId); }catch(_){ }
+      });
+
+      ['pointerup','pointercancel','lostpointercapture'].forEach(evt => {
+        zoom.addEventListener(evt, centerZoom);
+      });
+
+      zoom.addEventListener('pointerleave', ev => {
+        if(!ev.buttons) centerZoom();
+      });
+
+      zoom.addEventListener('keydown', () => { engaged = true; });
+      zoom.addEventListener('keyup', centerZoom);
+      zoom.addEventListener('blur', centerZoom);
+    })();
+
     // Slider 0..100 → axis -1..1, honoring "virtual_throttle_invert"
     function vjoyThrottle(val){
       const inv = document.getElementById('vth').dataset.invert === 'true';
