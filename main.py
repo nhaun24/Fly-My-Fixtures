@@ -92,7 +92,7 @@ DEFAULTS = {
     "debug_log_mode": "summary",       # summary | nonzero | full
     "debug_log_nonzero_limit": 64,     # max pairs in nonzero mode (0=all)
 
-    # --- Controller debug (buttons & axes) ---
+    # --- Controller debug ---
     "debug_controller_buttons": False,
 
     # --- Dedicated Zoom Axis (rocker) ---
@@ -545,7 +545,6 @@ class SenderThread(threading.Thread):
         self.zoom_val = 0
         self._btn_prev = {}   # index -> 0/1 for edge detection
         self._debug_prev_buttons = None
-        self._debug_prev_axes = None
 
     def start_sender(self):
         if self.sender:
@@ -624,44 +623,14 @@ class SenderThread(threading.Thread):
                 states[idx] = 0
         return states
 
-    def _collect_axis_states(self):
-        axes = {}
-        mapping = {
-            "pan": settings.get("ax_pan", 0),
-            "tilt": settings.get("ax_tilt", 1),
-            "throttle": settings.get("ax_throt", 2),
-            "zoom": settings.get("ax_zoom", -1),
-        }
-        for name, idx in mapping.items():
-            try:
-                idx = int(idx)
-            except Exception:
-                continue
-            if idx < 0:
-                continue
-            try:
-                value = float(self.axis(idx))
-            except Exception:
-                value = 0.0
-            axes[name] = round(max(-1.0, min(1.0, value)), 3)
-        return axes
-
     def _maybe_log_button_debug(self):
         if not settings.get("debug_controller_buttons", False):
             self._debug_prev_buttons = None
-            self._debug_prev_axes = None
             return
 
         states = self._collect_button_states()
-        axis_states = self._collect_axis_states()
         prev = self._debug_prev_buttons
-        prev_axes = self._debug_prev_axes
-        if (
-            prev is not None
-            and states == prev
-            and prev_axes is not None
-            and axis_states == prev_axes
-        ):
+        if prev is not None and states == prev:
             return
 
         pressed = [str(i) for i, v in sorted(states.items()) if v]
@@ -684,38 +653,8 @@ class SenderThread(threading.Thread):
             if changes:
                 message += f"; changes: {', '.join(changes)}"
 
-        if axis_states:
-            ordered = []
-            for key in ("pan", "tilt", "throttle", "zoom"):
-                if key in axis_states:
-                    ordered.append(f"{key}={axis_states[key]:+0.3f}")
-            others = sorted(k for k in axis_states.keys() if k not in {"pan", "tilt", "throttle", "zoom"})
-            for key in others:
-                ordered.append(f"{key}={axis_states[key]:+0.3f}")
-            message += f"; axes {{{', '.join(ordered)}}}"
-        else:
-            message += "; axes unavailable"
-
-        if prev_axes is not None:
-            axis_changes = []
-            keys = sorted(set(axis_states.keys()) | set(prev_axes.keys()))
-            for key in keys:
-                cur = axis_states.get(key)
-                before = prev_axes.get(key)
-                if cur is None or before is None:
-                    if cur is not None:
-                        axis_changes.append(f"{key}: new {cur:+0.3f}")
-                    else:
-                        axis_changes.append(f"{key}: removed")
-                    continue
-                if abs(cur - before) >= 0.005:
-                    axis_changes.append(f"{key}: {before:+0.3f} -> {cur:+0.3f}")
-            if axis_changes:
-                message += f"; axis changes: {', '.join(axis_changes)}"
-
         log(message)
         self._debug_prev_buttons = dict(states)
-        self._debug_prev_axes = dict(axis_states)
 
     def run(self):
         pygame.init()
@@ -1182,7 +1121,7 @@ Example:
                 <div class="inner">
                   <div class="grid">
                     <div class="cbrow"><input type="checkbox" id="debug_log_sacn" name="debug_log_sacn"><label for="debug_log_sacn">Log sACN Frames</label></div>
-                    <div class="cbrow"><input type="checkbox" id="debug_controller_buttons" name="debug_controller_buttons"><label for="debug_controller_buttons">Controller Input Debug</label></div>
+                    <div class="cbrow"><input type="checkbox" id="debug_controller_buttons" name="debug_controller_buttons"><label for="debug_controller_buttons">Controller Button Debug</label></div>
                     <div><label>Debug Interval (ms)</label><input type="number" name="debug_log_interval_ms"></div>
                     <div class="cbrow"><input type="checkbox" id="debug_log_only_changes" name="debug_log_only_changes"><label for="debug_log_only_changes">Only Log Changes</label></div>
                     <div><label>Debug Mode</label><input type="text" name="debug_log_mode" placeholder="summary|nonzero|full"></div>
