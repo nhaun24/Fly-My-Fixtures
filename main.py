@@ -1216,13 +1216,13 @@ Example:
                   ${editInput('Enabled','enabled',f.enabled)}
                   ${editInput('Universe','universe',f.universe,'number')}
                   ${editInput('Start Addr','start_addr',f.start_addr,'number')}
-                  ${editInput('Pan C','pan_coarse',f.pan_coarse,'number')}
-                  ${editInput('Pan F','pan_fine',f.pan_fine,'number')}
-                  ${editInput('Tilt C','tilt_coarse',f.tilt_coarse,'number')}
-                  ${editInput('Tilt F','tilt_fine',f.tilt_fine,'number')}
+                  ${editInput('Pan Coarse','pan_coarse',f.pan_coarse,'number')}
+                  ${editInput('Pan Fine','pan_fine',f.pan_fine,'number')}
+                  ${editInput('Tilt Coarse','tilt_coarse',f.tilt_coarse,'number')}
+                  ${editInput('Tilt Fine','tilt_fine',f.tilt_fine,'number')}
                   ${editInput('Dimmer','dimmer',f.dimmer,'number')}
                   ${editInput('Zoom','zoom',f.zoom,'number')}
-                  ${editInput('Zoom F','zoom_fine',f.zoom_fine,'number')}
+                  ${editInput('Zoom Fine','zoom_fine',f.zoom_fine,'number')}
                   ${editInput('Color Temp Ch','color_temp_channel',f.color_temp_channel,'number')}
                   ${editInput('Color Temp Val','color_temp_value',f.color_temp_value,'number')}
                   ${editInput('Invert Pan','invert_pan',f.invert_pan)}
