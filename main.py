@@ -141,7 +141,8 @@ FIXTURE_FIELDS = [
     "pan_coarse","pan_fine","tilt_coarse","tilt_fine",
     "dimmer","zoom","zoom_fine",
     "color_temp_channel","color_temp_value",
-    "invert_pan","invert_tilt","pan_bias","tilt_bias"
+    "invert_pan","invert_tilt","pan_bias","tilt_bias",
+    "status_led"
     ]
 
 def clamp_fixtures(fixtures):
@@ -438,10 +439,16 @@ def update_fixture_leds():
     if not fixture_leds or not fixture_leds.enabled:
         return
     fixtures = settings.get("fixtures", [])
-    states = []
-    limit = len(getattr(fixture_leds, "pins", [])) or fixture_leds.MAX_LEDS
-    for fx in fixtures[:limit]:
-        states.append(bool(fx.get("enabled", False)))
+    pin_count = len(getattr(fixture_leds, "pins", []))
+    limit = pin_count if pin_count > 0 else fixture_leds.MAX_LEDS
+    states = [False] * limit
+    for fx in fixtures:
+        try:
+            slot = int(str(fx.get("status_led", 0)))
+        except Exception:
+            continue
+        if 1 <= slot <= limit and bool(fx.get("enabled", False)):
+            states[slot-1] = True
     fixture_leds.set_states(states)
 
 def update_leds():
@@ -686,6 +693,13 @@ def normalize_fixture(fx):
         except: out[k] = 0
     out["invert_pan"]  = str(fx.get("invert_pan","False")).lower() in ("1","true","yes","on")
     out["invert_tilt"] = str(fx.get("invert_tilt","False")).lower() in ("1","true","yes","on")
+    try:
+        slot = int(str(fx.get("status_led", 0)))
+    except Exception:
+        slot = 0
+    if slot < 1 or slot > FIXTURE_LIMIT:
+        slot = 0
+    out["status_led"] = slot
     return out
 
 # ---------------- Sender Thread ----------------
@@ -1447,6 +1461,9 @@ Example:
                   <div><label>Pan Bias</label><input type="number" name="pan_bias" value="0"></div>
                   <div><label>Tilt Bias</label><input type="number" name="tilt_bias" value="0"></div>
 
+                  <div><label>Status LED (1-6)</label><input type="number" name="status_led" min="0" max="6" placeholder="1-6"></div>
+                  <div style="grid-column:1/-1"><small class="muted">Leave blank or 0 to disable the status LED mapping.</small></div>
+
                   <div class="cbrow"><input type="checkbox" id="fx_invert_pan"><label for="fx_invert_pan">Invert Pan</label></div>
                   <div class="cbrow"><input type="checkbox" id="fx_invert_tilt"><label for="fx_invert_tilt">Invert Tilt</label></div>
                 </div>
@@ -1475,7 +1492,7 @@ Example:
                   <button class="btn primary" type="button" onclick="doImport()">Import</button>
                   <button class="btn danger" type="button" onclick="hideImport()">Cancel</button>
                 </div>
-                <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias</p>
+                <p class="small muted">Columns: id,enabled,universe,start_addr,pan_coarse,pan_fine,tilt_coarse,tilt_fine,dimmer,zoom,zoom_fine,color_temp_channel,color_temp_value,invert_pan,invert_tilt,pan_bias,tilt_bias,status_led</p>
               </div>
             </div>
           </div>
@@ -1689,7 +1706,7 @@ Example:
         card.innerHTML = `
           <div><b>${f.id}</b> ${f.enabled ? '<span class="badge ok">Enabled</span>' : '<span class="badge warn">Disabled</span>'}</div>
           <div class="small muted">Uni ${f.universe} • Pan ${f.pan_coarse}/${f.pan_fine||0} • Tilt ${f.tilt_coarse}/${f.tilt_fine||0} • Dim ${f.dimmer||0} • Zoom ${f.zoom||0}${f.zoom_fine?('/'+f.zoom_fine):''}${colorTempSummary(f)}</div>
-          <div class="small muted">Invert P:${f.invert_pan? 'Y':'N'} T:${f.invert_tilt? 'Y':'N'} • Bias P:${f.pan_bias||0} T:${f.tilt_bias||0}</div>
+          <div class="small muted">Invert P:${f.invert_pan? 'Y':'N'} T:${f.invert_tilt? 'Y':'N'} • Bias P:${f.pan_bias||0} T:${f.tilt_bias||0}${statusLedSummary(f)}</div>
           <details class="fixture-details">
             <summary>Edit</summary>
             <div class="fxgrid">
@@ -1709,6 +1726,7 @@ Example:
               ${editInput('Invert Tilt','invert_tilt',f.invert_tilt)}
               ${editInput('Pan Bias','pan_bias',f.pan_bias,'number')}
               ${editInput('Tilt Bias','tilt_bias',f.tilt_bias,'number')}
+              ${editInput('Status LED','status_led',f.status_led,'number')}
             </div>
             <div class="form-actions">
               <button class="btn primary" onclick="saveFixture('${f.id}', this.closest('.form-actions').previousElementSibling)">Save</button>
@@ -1741,6 +1759,14 @@ Example:
         const valRaw = f.color_temp_value;
         const val = (valRaw === undefined || valRaw === null || valRaw === '') ? '' : `=${valRaw}`;
         return ` • Color Temp ${chan}${val}`;
+      }
+      return '';
+    }
+
+    function statusLedSummary(f){
+      const led = Number(f.status_led || 0);
+      if(led > 0){
+        return ` • Status LED #${led}`;
       }
       return '';
     }
@@ -1795,6 +1821,7 @@ Example:
       if(form.enabled) form.enabled.value = 'True';
       if(form.invert_pan) form.invert_pan.value = 'False';
       if(form.invert_tilt) form.invert_tilt.value = 'False';
+      if(form.status_led) form.status_led.value = '';
       loadFixtures();
     }
 
@@ -1994,20 +2021,28 @@ def api_status():
         delta = time.time() - status["last_frame_ts"]
         lf = f"{delta:.2f}s ago" if delta < 3600 else "long ago"
     fixtures = settings.get("fixtures", [])
+    led_pin_count = len(settings.get("gpio_fixture_led_pins", []))
+    led_limit = led_pin_count if led_pin_count > 0 else FIXTURE_LIMIT
+    led_slots = [{"ids": [], "on": False} for _ in range(led_limit)]
+    for fx in fixtures:
+        try:
+            slot = int(str(fx.get("status_led", 0)))
+        except Exception:
+            continue
+        if 1 <= slot <= led_limit:
+            entry = led_slots[slot-1]
+            label = fx.get("id") or f"Fixture {slot}"
+            entry.setdefault("ids", []).append(label)
+            if fx.get("enabled", False):
+                entry["on"] = True
     fixture_leds = []
-    for idx in range(FIXTURE_LIMIT):
-        if idx < len(fixtures):
-            fx = fixtures[idx] or {}
-            label = fx.get("id") or f"Fixture {idx+1}"
-            fixture_leds.append({
-                "label": label,
-                "on": bool(fx.get("enabled", False))
-            })
-        else:
-            fixture_leds.append({
-                "label": f"Slot {idx+1}",
-                "on": False
-            })
+    for idx, slot in enumerate(led_slots):
+        labels = slot.get("ids", [])
+        label = ", ".join(labels) if labels else f"Slot {idx+1}"
+        fixture_leds.append({
+            "label": label,
+            "on": bool(slot.get("on", False))
+        })
     return jsonify({
         "active": status["active"],
         "error": status["error"],
