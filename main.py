@@ -1084,6 +1084,19 @@ INDEX_HTML = """
      small{color:#9ca3af}
      .muted{color:#9ca3af}
      .small{font-size:12px}
+     .led-bank{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:12px}
+     .led-bank.split{flex-direction:column;gap:16px}
+     .led-row{display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+     .led{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:70px}
+     .led-label{font-size:12px;color:#9ca3af;text-align:center;word-break:break-word}
+     .led-bulb{width:28px;height:28px;border-radius:50%;position:relative;box-shadow:inset 0 0 6px rgba(0,0,0,.65);background:#1f2937;transition:box-shadow .2s ease,opacity .2s ease}
+     .led-bulb::after{content:"";position:absolute;inset:3px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.35),rgba(255,255,255,0));opacity:0;transition:opacity .2s ease}
+     .led-bulb.green{background:#064e3b}
+     .led-bulb.red{background:#7f1d1d}
+     .led-bulb.on{opacity:1;box-shadow:0 0 14px rgba(96,165,250,.35),inset 0 0 6px rgba(0,0,0,.65)}
+     .led-bulb.green.on{background:#16a34a;box-shadow:0 0 16px rgba(16,185,129,.55),inset 0 0 6px rgba(0,0,0,.5)}
+     .led-bulb.red.on{background:#dc2626;box-shadow:0 0 16px rgba(220,38,38,.6),inset 0 0 6px rgba(0,0,0,.5)}
+     .led-bulb.on::after{opacity:1}
      details.section{border:1px solid #2f3541;border-radius:12px;margin-bottom:12px;overflow:hidden;background:#0f141d}
      details.section > summary{cursor:pointer;padding:12px 14px;background:#101826;font-weight:600;border-bottom:1px solid #2f3541;list-style:none}
      details.section[open] > summary{background:#142033}
@@ -1131,6 +1144,48 @@ INDEX_HTML = """
             </div>
             <p class="small muted">Joystick: <span id="joy-name">-</span> • Axes: <span id="joy-axes">0</span> • Buttons: <span id="joy-buttons">0</span></p>
             <p class="small muted">Last frame: <span id="last-frame">-</span></p>
+          </div>
+
+          <div class="card wide">
+            <h3>Virtual LEDs</h3>
+            <div class="led-bank split">
+              <div class="led-row">
+                <div class="led">
+                  <div class="led-bulb green" id="led-power"></div>
+                  <span class="led-label">Power</span>
+                </div>
+                <div class="led">
+                  <div class="led-bulb red" id="led-error"></div>
+                  <span class="led-label">Error</span>
+                </div>
+              </div>
+              <div class="led-row" id="fixture-led-bank">
+                <div class="led" data-index="0">
+                  <div class="led-bulb red" id="fx-led-0"></div>
+                  <span class="led-label" id="fx-label-0">Slot 1</span>
+                </div>
+                <div class="led" data-index="1">
+                  <div class="led-bulb red" id="fx-led-1"></div>
+                  <span class="led-label" id="fx-label-1">Slot 2</span>
+                </div>
+                <div class="led" data-index="2">
+                  <div class="led-bulb red" id="fx-led-2"></div>
+                  <span class="led-label" id="fx-label-2">Slot 3</span>
+                </div>
+                <div class="led" data-index="3">
+                  <div class="led-bulb red" id="fx-led-3"></div>
+                  <span class="led-label" id="fx-label-3">Slot 4</span>
+                </div>
+                <div class="led" data-index="4">
+                  <div class="led-bulb red" id="fx-led-4"></div>
+                  <span class="led-label" id="fx-label-4">Slot 5</span>
+                </div>
+                <div class="led" data-index="5">
+                  <div class="led-bulb red" id="fx-led-5"></div>
+                  <span class="led-label" id="fx-label-5">Slot 6</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="card wide">
@@ -1433,6 +1488,28 @@ Example:
       el.className = 'pill ' + (off ? 'off' : (ok ? 'ok' : 'err'));
     }
 
+    function setLed(id, on){
+      const el = document.getElementById(id);
+      if(!el) return;
+      if(on){
+        el.classList.add('on');
+      }else{
+        el.classList.remove('on');
+      }
+    }
+
+    function updateFixtureLeds(list){
+      const rows = document.querySelectorAll('#fixture-led-bank .led');
+      rows.forEach((row, idx) => {
+        const data = Array.isArray(list) ? list[idx] : null;
+        const bulb = row.querySelector('.led-bulb');
+        const label = row.querySelector('.led-label');
+        const on = data && !!data.on;
+        if(bulb){ bulb.classList.toggle('on', on); }
+        if(label){ label.textContent = data && data.label ? data.label : `Slot ${idx+1}`; }
+      });
+    }
+
     async function refresh(){
       try{
         const s = await fetchJSON('/api/status');
@@ -1446,6 +1523,10 @@ Example:
 
         setPill('health-pill', !s.error, s.joystick_name=='' && !s.error);
         document.getElementById('health-text').innerText = s.error ? ('Error: ' + s.error_msg) : 'Good';
+
+        setLed('led-power', !!s.power_led);
+        setLed('led-error', !!s.error_led);
+        updateFixtureLeds(s.fixture_leds || []);
 
         const l = await fetch('/api/logs'); const t = await l.text();
         const ta = document.getElementById('logs'); ta.value = t; ta.scrollTop = ta.scrollHeight;
@@ -1863,6 +1944,21 @@ def api_status():
     if status["last_frame_ts"]:
         delta = time.time() - status["last_frame_ts"]
         lf = f"{delta:.2f}s ago" if delta < 3600 else "long ago"
+    fixtures = settings.get("fixtures", [])
+    fixture_leds = []
+    for idx in range(FIXTURE_LIMIT):
+        if idx < len(fixtures):
+            fx = fixtures[idx] or {}
+            label = fx.get("id") or f"Fixture {idx+1}"
+            fixture_leds.append({
+                "label": label,
+                "on": bool(fx.get("enabled", False))
+            })
+        else:
+            fixture_leds.append({
+                "label": f"Slot {idx+1}",
+                "on": False
+            })
     return jsonify({
         "active": status["active"],
         "error": status["error"],
@@ -1871,7 +1967,10 @@ def api_status():
         "axes": status["axes"],
         "buttons": status["buttons"],
         "last_frame": lf,
-        "virtual": settings.get("virtual_joystick_enabled", False)
+        "virtual": settings.get("virtual_joystick_enabled", False),
+        "power_led": bool(status["active"] and not status["error"]),
+        "error_led": bool(status["error"]),
+        "fixture_leds": fixture_leds
     })
 
 @APP.route("/api/logs")
