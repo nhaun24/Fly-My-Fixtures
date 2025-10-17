@@ -12,7 +12,8 @@ APP = Flask(__name__)
 
 SETTINGS_PATH = "settings.json"
 FIXTURES_CSV  = "fixtures.csv"
-LOG_MAX = 5000 
+LOG_MAX = 5000
+FIXTURE_LIMIT = 6
 
 # ---------------- Defaults ----------------
 DEFAULTS = {
@@ -26,6 +27,7 @@ DEFAULTS = {
     "gpio_green_pin": 17,   # BCM numbering (GPIO17)
     "gpio_red_pin": 27,     # BCM numbering (GPIO27)
     "gpio_active_low": False,  # set True if you wire LED to 3.3V and sink to GND via GPIO
+    "gpio_fixture_led_pins": [],   # up to 6 BCM pins for per-fixture LEDs
 
     # HOTAS axis / button mapping (verify with discover endpoint if needed)
     "ax_pan": 0,    # stick X
@@ -142,11 +144,34 @@ FIXTURE_FIELDS = [
     "invert_pan","invert_tilt","pan_bias","tilt_bias"
     ]
 
+def clamp_fixtures(fixtures):
+    try:
+        fixtures = list(fixtures or [])
+    except Exception:
+        return []
+    if len(fixtures) <= FIXTURE_LIMIT:
+        return fixtures
+    return fixtures[:FIXTURE_LIMIT]
+
+def normalize_fixture_led_pins(pins):
+    normalized = []
+    for pin in pins or []:
+        try:
+            value = int(pin)
+        except Exception:
+            continue
+        if value in normalized:
+            continue
+        normalized.append(value)
+        if len(normalized) >= FIXTURE_LIMIT:
+            break
+    return normalized
+
 def fixtures_to_csv(fixtures):
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=FIXTURE_FIELDS)
     w.writeheader()
-    for f in fixtures:
+    for f in clamp_fixtures(fixtures):
         row = {k: f.get(k, "") for k in FIXTURE_FIELDS}
         row["enabled"]    = "True"  if f.get("enabled", False) else "False"
         row["invert_pan"] = "True"  if f.get("invert_pan", False) else "False"
@@ -177,7 +202,7 @@ def maybe_load_fixtures_csv_into_settings():
         with open(FIXTURES_CSV, "r") as f:
             fixtures = csv_to_fixtures(f.read())
         if fixtures:
-            settings["fixtures"] = fixtures
+            settings["fixtures"] = clamp_fixtures(fixtures)
     except Exception:
         pass
 
@@ -214,14 +239,21 @@ def load_settings():
     merged = DEFAULTS.copy()
     for k, v in data.items():
         merged[k] = v
+    merged["fixtures"] = clamp_fixtures(merged.get("fixtures", []))
     settings = merged
     maybe_load_fixtures_csv_into_settings()
     save_settings()
 
 def save_settings():
+    settings["fixtures"] = clamp_fixtures(settings.get("fixtures", []))
+    settings["gpio_fixture_led_pins"] = normalize_fixture_led_pins(settings.get("gpio_fixture_led_pins", []))
     with open(SETTINGS_PATH, "w") as f:
         json.dump(settings, f, indent=2)
     write_fixtures_csv()
+    try:
+        update_fixture_leds()
+    except Exception:
+        pass
 
 def log(line):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -315,12 +347,108 @@ class LedGPIO:
             except Exception:
                 pass
 
+class FixtureLedBank:
+    MAX_LEDS = FIXTURE_LIMIT
+
+    def __init__(self, enabled, pins, active_low):
+        self.enabled = bool(enabled)
+        self.active_low = active_low
+        self.leds = []
+        self.GPIO = None
+        self.pins = []
+        if not self.enabled:
+            return
+
+        normalized = normalize_fixture_led_pins(pins)
+
+        if not normalized:
+            self.enabled = False
+            return
+
+        self.pins = normalized
+        try:
+            from gpiozero import LED
+            self.leds = [LED(pin, active_high=not active_low) for pin in self.pins]
+        except Exception:
+            self.leds = []
+            try:
+                import RPi.GPIO as GPIO
+                self.GPIO = GPIO
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setwarnings(False)
+                for pin in self.pins:
+                    initial = GPIO.LOW if not active_low else GPIO.HIGH
+                    GPIO.setup(pin, GPIO.OUT, initial=initial)
+            except Exception:
+                self.enabled = False
+
+    def _write(self, pin, on):
+        if not self.GPIO:
+            return
+        if self.active_low:
+            level = self.GPIO.HIGH if on else self.GPIO.LOW
+        else:
+            level = self.GPIO.LOW if on else self.GPIO.HIGH
+        self.GPIO.output(pin, level)
+
+    def set_states(self, states):
+        if not self.enabled:
+            return
+        states = list(states or [])
+        # pad with False to ensure remaining LEDs are turned off
+        while len(states) < len(self.pins):
+            states.append(False)
+
+        if self.leds:
+            for led, on in zip(self.leds, states):
+                try:
+                    (led.on() if on else led.off())
+                except Exception:
+                    pass
+        elif self.GPIO:
+            for pin, on in zip(self.pins, states):
+                self._write(pin, bool(on))
+
+    def off(self):
+        self.set_states([])
+
+    def close(self):
+        if not self.enabled:
+            return
+        try:
+            if self.leds:
+                for led in self.leds:
+                    led.off()
+        except Exception:
+            pass
+        if self.GPIO:
+            try:
+                for pin in self.pins:
+                    self._write(pin, False)
+                self.GPIO.cleanup()
+            except Exception:
+                pass
+
 # global LED manager
 led_gpio = None
+fixture_leds = None
+
+def update_fixture_leds():
+    global fixture_leds
+    if not fixture_leds or not fixture_leds.enabled:
+        return
+    fixtures = settings.get("fixtures", [])
+    states = []
+    limit = len(getattr(fixture_leds, "pins", [])) or fixture_leds.MAX_LEDS
+    for fx in fixtures[:limit]:
+        states.append(bool(fx.get("enabled", False)))
+    fixture_leds.set_states(states)
+
 def update_leds():
     try:
         if led_gpio:
             led_gpio.set(active=status["active"], error=status["error"])
+        update_fixture_leds()
     except Exception:
         pass
 
@@ -508,7 +636,14 @@ def normalize_types(d):
             try:
                 out[k] = json.loads(v) if isinstance(v, str) else list(v)
             except Exception:
-                out[k] = settings.get(k, default)
+                if isinstance(v, str):
+                    parts = [p.strip() for p in v.split(',') if p.strip()]
+                    if parts and all(p.lstrip("-+").isdigit() for p in parts):
+                        out[k] = [int(p) for p in parts]
+                    else:
+                        out[k] = settings.get(k, default)
+                else:
+                    out[k] = settings.get(k, default)
         else:
             out[k] = str(v)
     return out
@@ -1155,6 +1290,8 @@ Example:
                     <div><label>GPIO Green Pin</label><input type="number" name="gpio_green_pin"></div>
                     <div><label>GPIO Red Pin</label><input type="number" name="gpio_red_pin"></div>
                     <div class="cbrow"><input type="checkbox" id="gpio_active_low" name="gpio_active_low"><label for="gpio_active_low">Active Low</label></div>
+                    <div><label>Fixture LED Pins (max 6)</label><input type="text" name="gpio_fixture_led_pins" placeholder="e.g. 5,6,13,19,26,12"></div>
+                    <small class="muted" style="grid-column: 1 / -1;">Enter BCM pin numbers, comma-separated. LEDs light when fixtures are enabled.</small>
                   </div>
                 </div>
               </details>
@@ -1235,7 +1372,8 @@ Example:
                 <input type="hidden" name="invert_tilt" id="fx_invert_tilt_hidden" value="False">
 
                 <div class="form-actions">
-                  <button class="btn primary" type="submit">Add Fixture</button>
+                  <p id="fixture-limit-msg" class="small muted" style="margin:0 0 0.5rem 0;"></p>
+                  <button class="btn primary" type="submit" id="fx-add-btn">Add Fixture</button>
                 </div>
               </form>
             </div>
@@ -1263,6 +1401,7 @@ Example:
     async function fetchJSON(url, opts){ const r = await fetch(url, opts); const ct = r.headers.get('content-type')||''; if(!r.ok) throw new Error(await r.text()); return ct.includes('application/json') ? await r.json() : await r.text(); }
 
     const TAB_STORAGE_KEY = 'td.activeTab';
+    const FIXTURE_LIMIT = 6;
 
     function setActiveTab(tab){
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1325,7 +1464,11 @@ Example:
         if(isCheckbox(el)){
           el.checked = !!data[k];
         }else{
-          el.value = data[k];
+          if(Array.isArray(data[k])){
+            el.value = data[k].join(', ');
+          }else{
+            el.value = data[k];
+          }
         }
       }
       if(form["button_actions"]){
@@ -1350,6 +1493,15 @@ Example:
       for(const el of form.elements){
         if(!el.name) continue;
         data[el.name] = isCheckbox(el) ? el.checked : el.value;
+      }
+      if('gpio_fixture_led_pins' in data){
+        const pins = String(data.gpio_fixture_led_pins || '')
+          .split(',')
+          .map(p => p.trim())
+          .filter(p => p.length)
+          .map(p => Number(p))
+          .filter(p => Number.isInteger(p));
+        data.gpio_fixture_led_pins = pins;
       }
       const resp = await fetchJSON('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
       alert((resp && resp.message) || 'Saved');
@@ -1377,17 +1529,37 @@ Example:
     function hideImport(){ document.getElementById('import-area').style.display='none'; }
     async function doImport(){
       const csv = document.getElementById('csvtext').value;
-      await fetchJSON('/api/fixtures/import', {method:'POST', headers:{'Content-Type':'text/plain'}, body: csv});
-      hideImport(); loadFixtures();
+      try{
+        await fetchJSON('/api/fixtures/import', {method:'POST', headers:{'Content-Type':'text/plain'}, body: csv});
+        hideImport(); loadFixtures();
+      }catch(e){
+        alert(e.message || e);
+      }
     }
 
     async function loadFixtures(){
       const data = await fetchJSON('/api/fixtures');
       document.getElementById('multi-universe').checked = !!data.multi_universe_enabled;
+      const form = document.getElementById('fx-form');
+      const addBtn = document.getElementById('fx-add-btn');
+      const limitMsg = document.getElementById('fixture-limit-msg');
+      const count = data.fixtures.length;
+      const remaining = Math.max(0, FIXTURE_LIMIT - count);
+      if(form){ form.dataset.remaining = String(remaining); }
+      if(addBtn){ addBtn.disabled = remaining <= 0; }
+      if(limitMsg){
+        if(remaining <= 0){
+          limitMsg.textContent = `Fixture limit reached (${FIXTURE_LIMIT}). Delete one to add another.`;
+        }else if(remaining === 1){
+          limitMsg.textContent = 'You can add 1 more fixture.';
+        }else{
+          limitMsg.textContent = `You can add ${remaining} more fixtures.`;
+        }
+      }
       const wrap = document.getElementById('fixture-list');
       wrap.innerHTML = '';
-      if(!data.fixtures.length){ wrap.innerHTML = '<small>No fixtures yet.</small>'; return; }
-      for(const f of data.fixtures){
+      if(!count){ wrap.innerHTML = '<small>No fixtures yet.</small>'; return; }
+      for(const f of data.fixtures.slice(0, FIXTURE_LIMIT)){
         const card = document.createElement('div');
         card.className = 'fixture-card';
         card.innerHTML = `
@@ -1471,10 +1643,20 @@ Example:
 
     async function addFixture(){
       const form = document.getElementById('fx-form');
+      const remaining = Number(form?.dataset?.remaining || '0');
+      if(remaining <= 0){
+        alert(`Fixture limit of ${FIXTURE_LIMIT} reached. Delete a fixture before adding another.`);
+        return;
+      }
       syncFixtureCompat();
       const data = {};
       for(const el of form.elements){ if(el.name) data[el.name]=el.value; }
-      await fetchJSON('/api/fixtures', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+      try{
+        await fetchJSON('/api/fixtures', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+      }catch(e){
+        alert(e.message || e);
+        return;
+      }
       form.reset();
       // reset compat defaults
       document.getElementById('fx_enabled').checked = true;
@@ -1724,10 +1906,12 @@ def api_fixtures_create():
     if not fx["id"]:
         return jsonify({"error": "Fixture must have a non-empty 'id'"}), 400
     cur = settings.get("fixtures", [])
+    if len(cur) >= FIXTURE_LIMIT:
+        return jsonify({"error": f"Fixture limit of {FIXTURE_LIMIT} reached"}), 400
     if any(f.get("id")==fx["id"] for f in cur):
         return jsonify({"error": "Duplicate fixture id"}), 400
     with state_lock:
-        settings["fixtures"] = cur + [fx]
+        settings["fixtures"] = clamp_fixtures(cur + [fx])
         save_settings()
     log(f"Fixture added: {fx['id']}")
     return jsonify({"ok": True})
@@ -1743,7 +1927,7 @@ def api_fixtures_update(fid):
                 merged.update(normalize_fixture({**f, **body}))
                 merged["id"] = fid
                 arr[i] = merged
-                settings["fixtures"] = arr
+                settings["fixtures"] = clamp_fixtures(arr)
                 save_settings()
                 log(f"Fixture updated: {fid}")
                 return jsonify({"ok": True})
@@ -1756,7 +1940,7 @@ def api_fixtures_delete(fid):
         new = [f for f in arr if f.get("id")!=fid]
         if len(new)==len(arr):
             return jsonify({"error":"Not found"}), 404
-        settings["fixtures"] = new
+        settings["fixtures"] = clamp_fixtures(new)
         save_settings()
     log(f"Fixture removed: {fid}")
     return jsonify({"ok": True})
@@ -1790,7 +1974,10 @@ def api_fixtures_export():
 def api_fixtures_import():
     csv_txt = request.data.decode("utf-8", errors="ignore")
     try:
-        fixtures = csv_to_fixtures(csv_txt)
+        fixtures_raw = csv_to_fixtures(csv_txt)
+        if len(fixtures_raw) > FIXTURE_LIMIT:
+            return jsonify({"error": f"Fixture limit is {FIXTURE_LIMIT}; received {len(fixtures_raw)}"}), 400
+        fixtures = clamp_fixtures(fixtures_raw)
         with state_lock:
             settings["fixtures"] = fixtures
             save_settings()
@@ -1884,7 +2071,7 @@ def api_discover():
 # ---------------- Main ----------------
 
 def main():
-    global led_gpio
+    global led_gpio, fixture_leds
     load_settings()
     log("FollowSpot server starting…")
 
@@ -1893,6 +2080,9 @@ def main():
                        settings.get("gpio_green_pin", 17),
                        settings.get("gpio_red_pin", 27),
                        settings.get("gpio_active_low", False))
+    fixture_leds = FixtureLedBank(settings.get("gpio_enabled", True) and settings.get("gpio_fixture_led_pins"),
+                                  settings.get("gpio_fixture_led_pins", []),
+                                  settings.get("gpio_active_low", False))
     update_leds()
 
     worker.start()
