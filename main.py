@@ -1371,7 +1371,14 @@ Example:
                     <div class="cbrow"><input type="checkbox" id="debug_controller_buttons" name="debug_controller_buttons"><label for="debug_controller_buttons">Controller Button Debug</label></div>
                     <div><label>Debug Interval (ms)</label><input type="number" name="debug_log_interval_ms"></div>
                     <div class="cbrow"><input type="checkbox" id="debug_log_only_changes" name="debug_log_only_changes"><label for="debug_log_only_changes">Only Log Changes</label></div>
-                    <div><label>Debug Mode</label><input type="text" name="debug_log_mode" placeholder="summary|nonzero|full"></div>
+                    <div>
+                      <label for="debug_log_mode">Debug Mode</label>
+                      <select name="debug_log_mode" id="debug_log_mode">
+                        <option value="summary">Summary</option>
+                        <option value="nonzero">Nonzero</option>
+                        <option value="full">Full</option>
+                      </select>
+                    </div>
                     <div><label>Nonzero Limit</label><input type="number" name="debug_log_nonzero_limit"></div>
                   </div>
                 </div>
@@ -1549,6 +1556,19 @@ Example:
             el.value = data[k].join(', ');
           }else{
             el.value = data[k];
+            if(el.tagName === 'SELECT'){
+              const target = String(data[k] ?? '');
+              let matched = false;
+              for(const opt of el.options){
+                if(opt.value === target){
+                  matched = true;
+                  break;
+                }
+              }
+              if(!matched && el.options.length){
+                el.value = el.options[0].value;
+              }
+            }
           }
         }
       }
@@ -1680,10 +1700,16 @@ Example:
     function editInput(label, name, value, type){
       if(type==='number'){
         return `<div><label>${label}</label><input type="number" name="${name}" value="${value??''}"></div>`;
-      }else{
-        const v = (typeof value==='boolean') ? (value ? 'True' : 'False') : (value??'');
-        return `<div><label>${label}</label><input type="text" name="${name}" value="${v}"></div>`;
       }
+      const raw = value === undefined || value === null ? '' : String(value);
+      const rawLower = raw.toLowerCase();
+      const boolish = (typeof value === 'boolean') || ['true','false','1','0','yes','no','on','off',''].includes(rawLower);
+      if(boolish){
+        const truthy = ['1','true','yes','on'];
+        const boolVal = (typeof value === 'boolean') ? value : truthy.includes(rawLower);
+        return `<div><label>${label}</label><select name="${name}"><option value="True"${boolVal?' selected':''}>True</option><option value="False"${!boolVal?' selected':''}>False</option></select></div>`;
+      }
+      return `<div><label>${label}</label><input type="text" name="${name}" value="${raw}"></div>`;
     }
 
     function colorTempSummary(f){
@@ -1712,7 +1738,7 @@ Example:
 
     async function saveFixture(id, gridEl){
       const fields = {};
-      for(const el of gridEl.querySelectorAll('input')){
+      for(const el of gridEl.querySelectorAll('input, select')){
         fields[el.name] = el.value;
       }
       await fetchJSON('/api/fixtures/'+encodeURIComponent(id), {
