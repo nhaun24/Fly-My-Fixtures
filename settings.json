@@ -56,6 +56,7 @@
       "color_temp_value": 0,
       "pan_bias": 0,
       "tilt_bias": 0,
+      "status_led": 1,
       "invert_pan": false,
       "invert_tilt": false
     },
@@ -75,6 +76,7 @@
       "color_temp_value": 0,
       "pan_bias": 0,
       "tilt_bias": 0,
+      "status_led": 2,
       "invert_pan": false,
       "invert_tilt": false
     }
