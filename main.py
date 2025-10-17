@@ -565,6 +565,29 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
         if ch_temp and ch_temp > 0:
             frame[ch_temp-1] = clamp8(settings.get("color_temp_value", 0))
     else:
+        def resolve_channel(fx, channel):
+            try:
+                ch = int(channel)
+            except Exception:
+                return 0
+            if ch <= 0:
+                return 0
+
+            try:
+                start = int(fx.get("start_addr", 0))
+            except Exception:
+                start = 0
+
+            if start > 0:
+                # Treat channels as relative offsets when they fit within the fixture footprint.
+                relative_limit = max(0, 512 - start + 1)
+                if ch <= relative_limit:
+                    ch = start + ch - 1
+
+            if ch < 1 or ch > 512:
+                return 0
+            return ch
+
         for fx in fixtures:
             if not fx.get("enabled", False):
                 continue
@@ -581,8 +604,8 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
             t16 = max(settings["tilt_min"], min(settings["tilt_max"], t16))
 
             # Pan/Tilt
-            pc, pf = fx.get("pan_coarse", 0), fx.get("pan_fine", 0)
-            tc, tf = fx.get("tilt_coarse", 0), fx.get("tilt_fine", 0)
+            pc, pf = resolve_channel(fx, fx.get("pan_coarse", 0)), resolve_channel(fx, fx.get("pan_fine", 0))
+            tc, tf = resolve_channel(fx, fx.get("tilt_coarse", 0)), resolve_channel(fx, fx.get("tilt_fine", 0))
             pC, pF = to16(p16)
             tC, tF = to16(t16)
             if pc>0: frame[pc-1] = pC
@@ -591,11 +614,11 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
             if tf>0: frame[tf-1] = tF
 
             # Dimmer
-            dC = fx.get("dimmer", 0)
+            dC = resolve_channel(fx, fx.get("dimmer", 0))
             if dC>0: frame[dC-1] = clamp8(dimmer8)
 
             # Zoom
-            zC, zF = fx.get("zoom", 0), fx.get("zoom_fine", 0)
+            zC, zF = resolve_channel(fx, fx.get("zoom", 0)), resolve_channel(fx, fx.get("zoom_fine", 0))
             if zC>0:
                 if zF>0:
                     zC8, zF8 = to16(max(0, min(65535, int(zoom_val))))
@@ -604,7 +627,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
                 else:
                     frame[zC-1] = clamp8(zoom_val)
 
-            ch_temp = fx.get("color_temp_channel", 0)
+            ch_temp = resolve_channel(fx, fx.get("color_temp_channel", 0))
             if ch_temp and ch_temp > 0:
                 frame[ch_temp-1] = clamp8(fx.get("color_temp_value", 0))
 
