@@ -2,6 +2,12 @@
 
 Headless Python app that reads a joystick (e.g., Thrustmaster HOTAS), drives fixtures over **sACN (E1.31)**, and serves a **web UI** to configure fixtures dynamically (add/edit/toggle, single or multi-universe). Supports **GPIO LEDs on Raspberry Pi** (Green=Active, Red=Error). Settings persist to `settings.json` and auto-backup to `fixtures.csv`.
 
+Originally developed with the idea we would use a Raspberry Pi 3B+ with POE hat to power this, we were Hit with a driver issue. As there are no official drivers for debian, or any other flavor of linux, We are currently forced to use Windows with the official windows drivers available from the website.
+https://ts.thrustmaster.com/download/pub/webupdate/TFlightHotas/2025_TFHT_4.exe
+
+ We have found this reddit article on the linux drivers and will be attempting as development continues
+https://www.reddit.com/r/hotas/comments/v0ud87/to_use_the_thrustmaster_tflight_4_hotas_on_linux/
+
 ---
 <img width="903" height="1821" alt="image" src="https://github.com/user-attachments/assets/bfd30677-8244-49d9-9ec5-4ff243821b07" />
 
