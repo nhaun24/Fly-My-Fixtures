@@ -8,8 +8,6 @@ https://ts.thrustmaster.com/download/pub/webupdate/TFlightHotas/2025_TFHT_4.exe
  We have found this reddit article on the linux drivers and will be attempting as development continues
 https://www.reddit.com/r/hotas/comments/v0ud87/to_use_the_thrustmaster_tflight_4_hotas_on_linux/
 
----
-<img width="903" height="1821" alt="image" src="https://github.com/user-attachments/assets/bfd30677-8244-49d9-9ec5-4ff243821b07" />
 
 ## Features
 
