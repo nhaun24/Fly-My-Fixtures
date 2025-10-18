@@ -1071,7 +1071,7 @@ INDEX_HTML = """
     <html>
     <head>
     <meta charset="utf-8">
-    <title>Thrust-Daddy</title>
+    <title>Fly My Fixtures</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
      :root{color-scheme:dark}
@@ -1160,7 +1160,7 @@ INDEX_HTML = """
     </style>
     </head>
     <body>
-      <h1>Thrust-Daddy</h1>
+      <h1>Fly My Fixtures</h1>
       <p>
         <span class="switch"><span>Status:</span><span id="status-pill" class="pill off"></span><small id="status-text">Idle</small></span>
         <span class="switch"><span>Health:</span><span id="health-pill" class="pill off"></span><small id="health-text">Unknown</small></span>
