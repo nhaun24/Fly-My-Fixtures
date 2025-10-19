@@ -537,15 +537,29 @@ def _apply_inv_bias(val16, invert, bias):
 
 def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
     frames = {}  # uni -> [512]
+    per_address_priority = {}  # uni -> [512]
     use_multi = settings.get("multi_universe_enabled", False)
     default_uni = settings.get("default_universe", settings.get("universe", 1))
     priority = settings.get("priority", 150)
+
+    def get_frame(uni):
+        if uni not in frames:
+            frames[uni] = _blank_frame()
+        if uni not in per_address_priority:
+            per_address_priority[uni] = [0] * 512
+        return frames[uni]
+
+    def mark_priority(uni, ch):
+        if ch and 1 <= ch <= 512:
+            if uni not in per_address_priority:
+                per_address_priority[uni] = [0] * 512
+            per_address_priority[uni][ch - 1] = priority
 
     fixtures = settings.get("fixtures", [])
     if not fixtures:
         # fallback to legacy single-fixture fields
         uni = default_uni
-        frame = frames.setdefault(uni, _blank_frame())
+        frame = get_frame(uni)
         pc = settings.get("ch_pan_coarse", 0)
         pf = settings.get("ch_pan_fine", 0)
         tc = settings.get("ch_tilt_coarse", 0)
@@ -556,21 +570,35 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
 
         pcv, pfv = to16(pan16)
         tcv, tfv = to16(tilt16)
-        if pc>0: frame[pc-1] = pcv
-        if pf>0: frame[pf-1] = pfv
-        if tc>0: frame[tc-1] = tcv
-        if tf>0: frame[tf-1] = tfv
-        if dc>0: frame[dc-1] = clamp8(dimmer8)
+        if pc>0:
+            frame[pc-1] = pcv
+            mark_priority(uni, pc)
+        if pf>0:
+            frame[pf-1] = pfv
+            mark_priority(uni, pf)
+        if tc>0:
+            frame[tc-1] = tcv
+            mark_priority(uni, tc)
+        if tf>0:
+            frame[tf-1] = tfv
+            mark_priority(uni, tf)
+        if dc>0:
+            frame[dc-1] = clamp8(dimmer8)
+            mark_priority(uni, dc)
         if zc>0:
             if zf>0:
                 zc8, zf8 = to16(max(0, min(65535, int(zoom_val))))
                 frame[zc-1] = zc8
                 frame[zf-1] = zf8
+                mark_priority(uni, zc)
+                mark_priority(uni, zf)
             else:
                 frame[zc-1] = clamp8(zoom_val)
+                mark_priority(uni, zc)
         ch_temp = settings.get("ch_color_temp", 0)
         if ch_temp and ch_temp > 0:
             frame[ch_temp-1] = clamp8(settings.get("color_temp_value", 0))
+            mark_priority(uni, ch_temp)
     else:
         def resolve_channel(fx, channel):
             try:
@@ -601,7 +629,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
             uni = fx.get("universe", default_uni)
             if not use_multi:
                 uni = default_uni
-            frame = frames.setdefault(uni, _blank_frame())
+            frame = get_frame(uni)
 
             p16 = _apply_inv_bias(pan16,  fx.get("invert_pan", False),  fx.get("pan_bias", 0))
             t16 = _apply_inv_bias(tilt16, fx.get("invert_tilt", False), fx.get("tilt_bias", 0))
@@ -615,14 +643,24 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
             tc, tf = resolve_channel(fx, fx.get("tilt_coarse", 0)), resolve_channel(fx, fx.get("tilt_fine", 0))
             pC, pF = to16(p16)
             tC, tF = to16(t16)
-            if pc>0: frame[pc-1] = pC
-            if pf>0: frame[pf-1] = pF
-            if tc>0: frame[tc-1] = tC
-            if tf>0: frame[tf-1] = tF
+            if pc>0:
+                frame[pc-1] = pC
+                mark_priority(uni, pc)
+            if pf>0:
+                frame[pf-1] = pF
+                mark_priority(uni, pf)
+            if tc>0:
+                frame[tc-1] = tC
+                mark_priority(uni, tc)
+            if tf>0:
+                frame[tf-1] = tF
+                mark_priority(uni, tf)
 
             # Dimmer
             dC = resolve_channel(fx, fx.get("dimmer", 0))
-            if dC>0: frame[dC-1] = clamp8(dimmer8)
+            if dC>0:
+                frame[dC-1] = clamp8(dimmer8)
+                mark_priority(uni, dC)
 
             # Zoom
             zC, zF = resolve_channel(fx, fx.get("zoom", 0)), resolve_channel(fx, fx.get("zoom_fine", 0))
@@ -631,18 +669,28 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
                     zC8, zF8 = to16(max(0, min(65535, int(zoom_val))))
                     frame[zC-1] = zC8
                     frame[zF-1] = zF8
+                    mark_priority(uni, zC)
+                    mark_priority(uni, zF)
                 else:
                     frame[zC-1] = clamp8(zoom_val)
+                    mark_priority(uni, zC)
 
             ch_temp = resolve_channel(fx, fx.get("color_temp_channel", 0))
             if ch_temp and ch_temp > 0:
                 frame[ch_temp-1] = clamp8(fx.get("color_temp_value", 0))
+                mark_priority(uni, ch_temp)
 
     # push per-universe + debug
     for uni, data in frames.items():
         _ensure_output(sender, uni, priority)
+        pap = per_address_priority.get(uni)
+        if pap is None:
+            pap = [0] * 512
+        sender[uni].per_channel_priority = pap
         sender[uni].dmx_data = data
         _maybe_log_sacn(uni, data)
+
+    return set(frames.keys())
 
 # ---------------- Normalization ----------------
 
@@ -718,6 +766,7 @@ class SenderThread(threading.Thread):
         self._btn_prev = {}   # index -> 0/1 for edge detection
         self._debug_prev_buttons = None
         self._debug_prev_axes = None
+        self._active_universes = set()
 
     def start_sender(self):
         if self.sender:
@@ -727,6 +776,7 @@ class SenderThread(threading.Thread):
                 pass
         self.sender = sacn.sACNsender()
         self.sender.start()
+        self._active_universes.clear()
         log(f"Activated sACN (priority {settings['priority']})")
 
     def stop_sender(self, terminate=True):
@@ -734,8 +784,13 @@ class SenderThread(threading.Thread):
             try:
                 if terminate:
                     try:
-                        _ensure_output(self.sender, settings.get("default_universe", 1), settings.get("priority", 150))
-                        self.sender[settings.get("default_universe", 1)].dmx_data = [0]*512
+                        targets = set(self._active_universes)
+                        if not targets:
+                            targets.add(settings.get("default_universe", 1))
+                        for uni in targets:
+                            _ensure_output(self.sender, uni, settings.get("priority", 150))
+                            self.sender[uni].per_channel_priority = [0]*512
+                            self.sender[uni].dmx_data = [0]*512
                     except Exception:
                         pass
                 self.sender.stop()
@@ -743,6 +798,7 @@ class SenderThread(threading.Thread):
             except Exception as e:
                 log(f"Sender stop error: {e}")
         self.sender = None
+        self._active_universes.clear()
 
     def init_joystick(self):
         pygame.joystick.quit(); pygame.joystick.init()
@@ -1040,7 +1096,22 @@ class SenderThread(threading.Thread):
                         self.dimmer = 0
 
                     # send to all fixtures/universes
-                    send_frames_for_fixtures(self.sender, self.pan_pos, self.tilt_pos, self.dimmer, self.zoom_val)
+                    prev_universes = set(self._active_universes)
+                    new_universes = send_frames_for_fixtures(
+                        self.sender,
+                        self.pan_pos,
+                        self.tilt_pos,
+                        self.dimmer,
+                        self.zoom_val,
+                    )
+                    for uni in prev_universes - new_universes:
+                        try:
+                            _ensure_output(self.sender, uni, settings.get("priority", 150))
+                            self.sender[uni].per_channel_priority = [0]*512
+                            self.sender[uni].dmx_data = [0]*512
+                        except Exception:
+                            pass
+                    self._active_universes = new_universes
                     status["last_frame_ts"] = time.time()
 
                 clock.tick(settings["fps"])
