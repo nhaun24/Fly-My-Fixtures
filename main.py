@@ -98,7 +98,7 @@ DEFAULTS = {
     "debug_controller_buttons": False,
 
     # --- Dedicated Zoom Axis (rocker) ---
-    "ax_zoom": -1,           # set to the rocker’s axis index; -1 disables (uses legacy zoom-mod)
+    "ax_zoom": 7,            # set to the rocker’s axis index (7 = T.Flight HOTAS rocker); -1 disables legacy zoom-mod
     "zoom_invert": False,    # invert the rocker direction
     "zoom_deadband": 0.05,   # like pan/tilt deadband
     "zoom_expo": 0.4,        # response curve
