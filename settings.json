@@ -89,9 +89,9 @@
   "debug_log_only_changes": true,
   "debug_log_mode": "summary",
   "debug_log_nonzero_limit": 64,
-  "ax_zoom": 7,
+  "ax_zoom": 6,
   "zoom_invert": false,
   "zoom_deadband": 0.05,
   "zoom_expo": 0.4,
-  "zoom_speed": 3000
+  "zoom_speed": 300
 }
