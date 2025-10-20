@@ -1494,6 +1494,7 @@ Example:
 
               <div class="form-actions">
                 <button class="btn primary" type="submit">Save Settings</button>
+                <button class="btn danger" type="button" id="restart-btn" onclick="restartService(this)">Restart Service</button>
               </div>
             </form>
           </div>
@@ -1720,6 +1721,42 @@ Example:
       loadFixtures();
       readBtnIndicesFromForm();
       await loadSettings(); // refresh slider invert flag
+    }
+
+    /* ---------- Restart service (two-step confirm) ---------- */
+    let restartConfirmTimer = null;
+
+    async function restartService(btn){
+      if(!btn) return;
+      if(btn.dataset.confirm === 'true'){
+        btn.disabled = true;
+        btn.textContent = 'Restarting...';
+        btn.classList.add('danger');
+        clearTimeout(restartConfirmTimer);
+        restartConfirmTimer = null;
+        try{
+          const resp = await fetchJSON('/api/restart', {method:'POST'});
+          alert((resp && resp.message) || 'Restarting service...');
+        }catch(e){
+          alert(e.message || e);
+          btn.disabled = false;
+          btn.textContent = 'Restart Service';
+          btn.classList.add('danger');
+          btn.dataset.confirm = '';
+          return;
+        }
+        // don't reset text; service will restart shortly
+        return;
+      }
+      btn.dataset.confirm = 'true';
+      btn.textContent = 'Click again to confirm';
+      btn.classList.add('danger');
+      clearTimeout(restartConfirmTimer);
+      restartConfirmTimer = setTimeout(() => {
+        btn.dataset.confirm = '';
+        btn.textContent = 'Restart Service';
+        btn.disabled = false;
+      }, 5000);
     }
 
     /* ---------- Fixtures helper to mirror checkboxes into compat fields ---------- */
@@ -2308,6 +2345,26 @@ def api_release():
         log("Released via UI")
         update_leds()
     return jsonify({"ok": True})
+
+@APP.route("/api/restart", methods=["POST"])
+def api_restart():
+    log("Restart requested via UI")
+    with state_lock:
+        try:
+            worker.stop_sender(terminate=True)
+        except Exception:
+            pass
+        status["active"] = False
+        status["error"] = False
+        status["error_msg"] = ""
+    update_leds()
+
+    def _delayed_restart():
+        time.sleep(0.5)
+        os._exit(0)
+
+    threading.Thread(target=_delayed_restart, daemon=True).start()
+    return jsonify({"ok": True, "message": "Restarting service..."})
 
 @APP.route("/api/discover")
 def api_discover():
