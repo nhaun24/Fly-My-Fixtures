@@ -1,4 +1,4 @@
-import os, json, time, threading, queue, csv, io
+import os, json, time, threading, queue, csv, io, sys, subprocess
 from datetime import datetime
 from flask import Flask, request, jsonify, Response
 import pygame
@@ -2361,7 +2361,21 @@ def api_restart():
 
     def _delayed_restart():
         time.sleep(0.5)
-        os._exit(0)
+        argv = sys.argv[:]
+        try:
+            if getattr(sys, "frozen", False):
+                executable = sys.executable
+                os.execv(executable, [executable] + argv[1:])
+            else:
+                os.execv(sys.executable, [sys.executable] + argv)
+        except Exception as exc:
+            try:
+                log(f"Restart exec failed ({exc}); spawning new process")
+                subprocess.Popen([sys.executable] + argv)
+            except Exception as spawn_exc:
+                log(f"Restart spawn failed: {spawn_exc}; terminating")
+            finally:
+                os._exit(0)
 
     threading.Thread(target=_delayed_restart, daemon=True).start()
     return jsonify({"ok": True, "message": "Restarting service..."})
