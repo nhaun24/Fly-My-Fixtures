@@ -20,6 +20,7 @@ DEFAULTS = {
     # legacy single-universe defaults (still used as defaults)
     "universe": 1,
     "priority": 150,
+    "per_address_priority_enabled": True,
     "fps": 60,
     "sacn_bind_addresses": [],
 
@@ -672,7 +673,8 @@ def _apply_inv_bias(val16, invert, bias):
 
 def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
     frames = {}  # uni -> [512]
-    per_address_priority = {}  # uni -> [512]
+    pap_enabled = settings.get("per_address_priority_enabled", True)
+    per_address_priority = {} if pap_enabled else None  # uni -> [512]
     use_multi = settings.get("multi_universe_enabled", False)
     default_uni = settings.get("default_universe", settings.get("universe", 1))
     priority = settings.get("priority", 150)
@@ -680,11 +682,13 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
     def get_frame(uni):
         if uni not in frames:
             frames[uni] = _blank_frame()
-        if uni not in per_address_priority:
+        if pap_enabled and uni not in per_address_priority:
             per_address_priority[uni] = [0] * 512
         return frames[uni]
 
     def mark_priority(uni, ch):
+        if not pap_enabled:
+            return
         if ch and 1 <= ch <= 512:
             if uni not in per_address_priority:
                 per_address_priority[uni] = [0] * 512
@@ -818,10 +822,16 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
     # push per-universe + debug
     for uni, data in frames.items():
         _ensure_output(sender, uni, priority)
-        pap = per_address_priority.get(uni)
-        if pap is None:
-            pap = [0] * 512
-        sender[uni].per_channel_priority = pap
+        if pap_enabled:
+            pap = per_address_priority.get(uni)
+            if pap is None:
+                pap = [0] * 512
+            sender[uni].per_channel_priority = pap
+        else:
+            try:
+                sender[uni].per_channel_priority = None
+            except Exception:
+                pass
         sender[uni].dmx_data = data
         _maybe_log_sacn(uni, data)
 
@@ -975,9 +985,16 @@ class SenderThread(threading.Thread):
                         targets = set(self._active_universes)
                         if not targets:
                             targets.add(settings.get("default_universe", 1))
+                        pap_enabled = settings.get("per_address_priority_enabled", True)
                         for uni in targets:
                             _ensure_output(self.sender, uni, settings.get("priority", 150))
-                            self.sender[uni].per_channel_priority = [0]*512
+                            if pap_enabled:
+                                self.sender[uni].per_channel_priority = [0]*512
+                            else:
+                                try:
+                                    self.sender[uni].per_channel_priority = None
+                                except Exception:
+                                    pass
                             self.sender[uni].dmx_data = [0]*512
                     except Exception:
                         pass
@@ -1292,10 +1309,17 @@ class SenderThread(threading.Thread):
                         self.dimmer,
                         self.zoom_val,
                     )
+                    pap_enabled = settings.get("per_address_priority_enabled", True)
                     for uni in prev_universes - new_universes:
                         try:
                             _ensure_output(self.sender, uni, settings.get("priority", 150))
-                            self.sender[uni].per_channel_priority = [0]*512
+                            if pap_enabled:
+                                self.sender[uni].per_channel_priority = [0]*512
+                            else:
+                                try:
+                                    self.sender[uni].per_channel_priority = None
+                                except Exception:
+                                    pass
                             self.sender[uni].dmx_data = [0]*512
                         except Exception:
                             pass
@@ -1554,6 +1578,8 @@ INDEX_HTML = """
                     <div><label>Priority</label><input type="number" name="priority"></div>
                     <div><label>FPS</label><input type="number" name="fps"></div>
                     <div><label>Default Universe</label><input type="number" name="default_universe"></div>
+                    <div class="cbrow"><input type="checkbox" id="per_address_priority_enabled" name="per_address_priority_enabled"><label for="per_address_priority_enabled">Enable Per-Address Priority</label></div>
+                    <small class="muted" style="grid-column:1 / -1;">When enabled, only patched channels use the configured priority. Disable to send a uniform frame priority.</small>
                     <div style="grid-column:1 / -1">
                       <label>Network Adapters</label>
                       <div id="sacn-iface-list" class="checklist">

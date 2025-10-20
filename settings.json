@@ -1,6 +1,7 @@
 {
   "universe": 1,
   "priority": 150,
+  "per_address_priority_enabled": true,
   "fps": 60,
   "gpio_enabled": true,
   "gpio_green_pin": 17,
