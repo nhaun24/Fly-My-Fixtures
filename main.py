@@ -1,4 +1,4 @@
-import os, json, time, threading, queue, csv, io, sys, subprocess
+import os, json, time, threading, queue, csv, io, sys, subprocess, socket, inspect, re
 from datetime import datetime
 from flask import Flask, request, jsonify, Response
 import pygame
@@ -21,6 +21,7 @@ DEFAULTS = {
     "universe": 1,
     "priority": 150,
     "fps": 60,
+    "sacn_bind_addresses": [],
 
     # --- GPIO LED settings ---
     "gpio_enabled": True,
@@ -168,6 +169,138 @@ def normalize_fixture_led_pins(pins):
             break
     return normalized
 
+def sanitize_bind_addresses(values):
+    cleaned = []
+    seen = set()
+    items = values
+    if isinstance(values, str):
+        try:
+            parsed = json.loads(values)
+            if isinstance(parsed, list):
+                items = parsed
+            else:
+                items = [values]
+        except Exception:
+            items = [values]
+    for value in items or []:
+        if value is None:
+            continue
+        addr = str(value).strip()
+        if not addr:
+            continue
+        if addr in ("0.0.0.0", "255.255.255.255"):
+            continue
+        if not re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", addr):
+            continue
+        if addr in seen:
+            continue
+        parts = addr.split('.')
+        if any(int(p) > 255 for p in parts if p.isdigit()):
+            continue
+        cleaned.append(addr)
+        seen.add(addr)
+    return cleaned
+
+def list_network_interfaces():
+    adapters = []
+    seen = set()
+
+    def add_adapter(name, addr, loopback=False, description=""):
+        if not addr:
+            return
+        if addr in ("0.0.0.0", "255.255.255.255"):
+            return
+        key = f"{name}|{addr}"
+        if key in seen:
+            return
+        adapters.append({
+            "name": name,
+            "address": addr,
+            "label": f"{name} – {addr}",
+            "is_loopback": bool(loopback),
+            "description": description or ""
+        })
+        seen.add(key)
+
+    # Try psutil if available (covers most platforms)
+    try:
+        import psutil  # type: ignore
+        for name, addr_list in psutil.net_if_addrs().items():
+            for info in addr_list:
+                if getattr(info, "family", None) == socket.AF_INET:
+                    add_adapter(name, info.address, info.address.startswith("127."))
+    except Exception:
+        pass
+
+    # POSIX fallback using ioctl
+    if not adapters:
+        try:
+            names = []
+            if hasattr(socket, "if_nameindex"):
+                names = [name for _, name in socket.if_nameindex()]
+            elif os.path.isdir("/sys/class/net"):
+                names = os.listdir("/sys/class/net")
+            for name in names:
+                try:
+                    import fcntl, struct  # type: ignore
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    res = fcntl.ioctl(
+                        s.fileno(),
+                        0x8915,  # SIOCGIFADDR
+                        struct.pack('256s', name.encode('utf-8'))
+                    )
+                    addr = socket.inet_ntoa(res[20:24])
+                    add_adapter(name, addr, addr.startswith("127."))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    # Parse `ip -4 addr show`
+    if not adapters:
+        try:
+            out = subprocess.check_output(["ip", "-4", "addr", "show"], text=True, encoding="utf-8", errors="ignore")
+            current = None
+            for line in out.splitlines():
+                if not line:
+                    continue
+                if not line.startswith(" "):
+                    parts = line.split(":", 2)
+                    if len(parts) >= 2:
+                        current = parts[1].strip().split("@")[0]
+                else:
+                    line = line.strip()
+                    if line.startswith("inet ") and current:
+                        addr = line.split()[1].split("/")[0]
+                        add_adapter(current, addr, addr.startswith("127."))
+        except Exception:
+            pass
+
+    # Windows ipconfig fallback
+    if not adapters and os.name == "nt":
+        try:
+            out = subprocess.check_output(["ipconfig"], text=True, encoding="utf-8", errors="ignore")
+            current = None
+            for raw in out.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                if raw and not raw.startswith(" ") and not raw.startswith("\t"):
+                    current = line.rstrip(":")
+                    continue
+                match = re.search(r"IPv4 Address[^:]*:\s*([0-9.]+)", line)
+                if match and current:
+                    addr = match.group(1)
+                    add_adapter(current, addr, addr.startswith("127."))
+        except Exception:
+            pass
+
+    adapters.sort(key=lambda item: (item["is_loopback"], item["name"], item["address"]))
+    return adapters
+
+def get_sacn_bind_addresses():
+    return sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
+
 def fixtures_to_csv(fixtures):
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=FIXTURE_FIELDS)
@@ -241,6 +374,7 @@ def load_settings():
     for k, v in data.items():
         merged[k] = v
     merged["fixtures"] = clamp_fixtures(merged.get("fixtures", []))
+    merged["sacn_bind_addresses"] = sanitize_bind_addresses(merged.get("sacn_bind_addresses", []))
     settings = merged
     maybe_load_fixtures_csv_into_settings()
     save_settings()
@@ -248,6 +382,7 @@ def load_settings():
 def save_settings():
     settings["fixtures"] = clamp_fixtures(settings.get("fixtures", []))
     settings["gpio_fixture_led_pins"] = normalize_fixture_led_pins(settings.get("gpio_fixture_led_pins", []))
+    settings["sacn_bind_addresses"] = sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
     with open(SETTINGS_PATH, "w") as f:
         json.dump(settings, f, indent=2)
     write_fixtures_csv()
@@ -775,9 +910,62 @@ class SenderThread(threading.Thread):
             except Exception:
                 pass
         self.sender = sacn.sACNsender()
-        self.sender.start()
+        bind_addrs = get_sacn_bind_addresses()
+        start_kwargs = {}
+        used_addrs = []
+        try:
+            sig = inspect.signature(self.sender.start)
+        except Exception:
+            sig = None
+        if bind_addrs:
+            if sig and "bind_addresses" in sig.parameters:
+                start_kwargs["bind_addresses"] = bind_addrs
+            elif sig and "bind_address" in sig.parameters:
+                start_kwargs["bind_address"] = bind_addrs[0]
+        try:
+            if start_kwargs:
+                self.sender.start(**start_kwargs)
+            else:
+                self.sender.start()
+        except TypeError:
+            self.sender.start()
+        except Exception as e:
+            log(f"Sender start error: {e}")
+            raise
+
+        configured = False
+        if bind_addrs:
+            if hasattr(self.sender, "bind_addresses"):
+                try:
+                    self.sender.bind_addresses = bind_addrs
+                    configured = True
+                    used_addrs = list(bind_addrs)
+                except Exception:
+                    pass
+            if not configured and hasattr(self.sender, "bind_address"):
+                try:
+                    self.sender.bind_address = bind_addrs[0]
+                    configured = True
+                    used_addrs = [bind_addrs[0]]
+                except Exception:
+                    pass
+            if not configured:
+                if start_kwargs.get("bind_addresses"):
+                    used_addrs = list(bind_addrs)
+                elif start_kwargs.get("bind_address"):
+                    used_addrs = [start_kwargs["bind_address"]]
+                else:
+                    used_addrs = bind_addrs[:1]
+                if len(bind_addrs) > 1 and len(used_addrs) == 1:
+                    log("sACN library does not support multiple bind addresses; using first selection")
         self._active_universes.clear()
-        log(f"Activated sACN (priority {settings['priority']})")
+        if bind_addrs:
+            if used_addrs:
+                log(f"Activated sACN (priority {settings['priority']}) via {', '.join(used_addrs)}")
+            else:
+                log(f"Activated sACN (priority {settings['priority']}) (default routing)")
+        else:
+            log(f"Activated sACN (priority {settings['priority']})")
 
     def stop_sender(self, terminate=True):
         if self.sender:
@@ -1159,6 +1347,11 @@ INDEX_HTML = """
      .grid > div{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:12px;background:#0f141d;border:1px solid #2b3140}
      .grid > .cbrow{flex-direction:row;align-items:center;gap:10px;margin-top:0;padding:14px}
      .grid > .cbrow label{margin:0}
+     .checklist{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+     .checklist-option{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:#101826;border:1px solid #2b3140}
+     .checklist-option input{margin-top:4px}
+     .checklist-text{display:flex;flex-direction:column;gap:4px}
+     .checklist-title{font-weight:600;font-size:14px;color:#f3f4f6}
      input[type=number],input[type=text],select{width:100%;padding:10px 12px;border:1px solid #303845;border-radius:10px;background:#1a1d25;color:#e5e7eb;font-size:14px;transition:border-color .15s ease,box-shadow .15s ease}
      input[type=number]:focus,input[type=text]:focus,select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
      input[type=checkbox]{width:auto;height:auto;accent-color:#2563eb}
@@ -1361,6 +1554,14 @@ INDEX_HTML = """
                     <div><label>Priority</label><input type="number" name="priority"></div>
                     <div><label>FPS</label><input type="number" name="fps"></div>
                     <div><label>Default Universe</label><input type="number" name="default_universe"></div>
+                    <div style="grid-column:1 / -1">
+                      <label>Network Adapters</label>
+                      <div id="sacn-iface-list" class="checklist">
+                        <p class="small muted" id="sacn-iface-loading">Loading adapters…</p>
+                      </div>
+                      <input type="hidden" name="sacn_bind_addresses" id="sacn_bind_addresses">
+                      <small class="muted">Select adapters for sACN output. Leave empty to let the OS choose routing.</small>
+                    </div>
                   </div>
                 </div>
               </details>
@@ -1577,6 +1778,94 @@ Example:
     const TAB_STORAGE_KEY = 'td.activeTab';
     const FIXTURE_LIMIT = 6;
 
+    let NETWORK_ADAPTERS = null;
+
+    async function ensureNetworkAdapters(){
+      if(Array.isArray(NETWORK_ADAPTERS)) return NETWORK_ADAPTERS;
+      try{
+        const resp = await fetchJSON('/api/network/adapters');
+        NETWORK_ADAPTERS = Array.isArray(resp.adapters) ? resp.adapters : [];
+      }catch(e){
+        NETWORK_ADAPTERS = [];
+        console.error('Failed to load network adapters', e);
+      }
+      return NETWORK_ADAPTERS;
+    }
+
+    function syncSacnInterfaces(){
+      const container = document.getElementById('sacn-iface-list');
+      const hidden = document.getElementById('sacn_bind_addresses');
+      if(!hidden) return;
+      const selected = [];
+      if(container){
+        container.querySelectorAll('input[type="checkbox"][data-addr]').forEach(cb => {
+          if(cb.checked){
+            selected.push(cb.dataset.addr);
+          }
+        });
+      }
+      hidden.value = JSON.stringify(selected);
+    }
+
+    function renderNetworkAdapters(selected){
+      const container = document.getElementById('sacn-iface-list');
+      const hidden = document.getElementById('sacn_bind_addresses');
+      if(!container){
+        if(hidden) hidden.value = JSON.stringify(selected || []);
+        return;
+      }
+      const adapters = Array.isArray(NETWORK_ADAPTERS) ? NETWORK_ADAPTERS : [];
+      const selectedSet = new Set((selected || []).map(v => String(v)));
+      container.innerHTML = '';
+      if(!adapters.length){
+        const msg = document.createElement('p');
+        msg.className = 'small muted';
+        msg.textContent = 'No network adapters detected.';
+        container.appendChild(msg);
+      }else{
+        adapters.forEach((adapter, idx) => {
+          const id = `iface-${idx}`;
+          const wrapper = document.createElement('label');
+          wrapper.className = 'checklist-option';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.id = id;
+          cb.dataset.addr = adapter.address;
+          cb.checked = selectedSet.has(String(adapter.address));
+          wrapper.appendChild(cb);
+          const textWrap = document.createElement('div');
+          textWrap.className = 'checklist-text';
+          const title = document.createElement('div');
+          title.className = 'checklist-title';
+          title.textContent = adapter.label || `${adapter.name} – ${adapter.address}`;
+          textWrap.appendChild(title);
+          if(adapter.description){
+            const desc = document.createElement('small');
+            desc.className = 'muted';
+            desc.textContent = adapter.description;
+            textWrap.appendChild(desc);
+          }else if(adapter.is_loopback){
+            const note = document.createElement('small');
+            note.className = 'muted';
+            note.textContent = 'Loopback';
+            textWrap.appendChild(note);
+          }
+          wrapper.appendChild(textWrap);
+          container.appendChild(wrapper);
+        });
+      }
+      if(!container.dataset.bound){
+        container.addEventListener('change', syncSacnInterfaces);
+        container.dataset.bound = 'true';
+      }
+      syncSacnInterfaces();
+    }
+
+    async function refreshNetworkAdapters(selected){
+      await ensureNetworkAdapters();
+      renderNetworkAdapters(selected);
+    }
+
     function setActiveTab(tab){
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -1684,6 +1973,12 @@ Example:
           }
         }
       }
+      const sacnSelected = Array.isArray(data.sacn_bind_addresses) ? data.sacn_bind_addresses : [];
+      await refreshNetworkAdapters(sacnSelected);
+      const sacnHidden = document.getElementById('sacn_bind_addresses');
+      if(sacnHidden){
+        sacnHidden.value = JSON.stringify(sacnSelected);
+      }
       if(form["button_actions"]){
         try{
           form["button_actions"].value = JSON.stringify(data.button_actions || [], null, 2);
@@ -1700,6 +1995,7 @@ Example:
     async function saveSettings(){
       // for fixtures "add", mirror the visible checkboxes into compat text fields
       syncFixtureCompat();
+      syncSacnInterfaces();
 
       const form = document.getElementById('settings-form');
       const data = {};
@@ -1715,6 +2011,14 @@ Example:
           .map(p => Number(p))
           .filter(p => Number.isInteger(p));
         data.gpio_fixture_led_pins = pins;
+      }
+      if(typeof data.sacn_bind_addresses === 'string'){
+        try{
+          const parsed = JSON.parse(data.sacn_bind_addresses);
+          data.sacn_bind_addresses = Array.isArray(parsed) ? parsed : [];
+        }catch{
+          data.sacn_bind_addresses = [];
+        }
       }
       const resp = await fetchJSON('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
       alert((resp && resp.message) || 'Saved');
@@ -2169,6 +2473,13 @@ def api_status():
 def api_logs():
     flush_logs()
     return Response("\n".join(log_store[-800:]) + "\n", mimetype="text/plain")
+
+@APP.route("/api/network/adapters", methods=["GET"])
+def api_network_adapters():
+    return jsonify({
+        "adapters": list_network_interfaces(),
+        "selected": get_sacn_bind_addresses()
+    })
 
 @APP.route("/api/settings", methods=["GET","POST"])
 def api_settings():
