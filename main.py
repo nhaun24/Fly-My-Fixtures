@@ -2341,7 +2341,7 @@ def main():
 
     worker.start()
     # Run Flask (port 80; change to 8080 if preferred)
-    APP.run(host="0.0.0.0", port=80, threaded=True)
+    APP.run(host="0.0.0.0", port=8080, threaded=True)
 
 if __name__ == "__main__":
     main()
