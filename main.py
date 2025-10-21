@@ -937,17 +937,28 @@ def _maybe_log_sacn(uni, data):
 
 def _blank_frame(): return [0]*512
 
-def _ensure_output(sender, uni, priority):
-    sender.activate_output(uni)
-    sender[uni].priority = priority
-    sender[uni].multicast = True
+def _ensure_output(sender, uni, priority, mirrors=None):
+    targets = []
+    if sender:
+        targets.append(sender)
+    if mirrors:
+        targets.extend(mirrors)
+    if not targets:
+        return
+    for s in targets:
+        try:
+            s.activate_output(uni)
+            s[uni].priority = priority
+            s[uni].multicast = True
+        except Exception:
+            continue
 
 def _apply_inv_bias(val16, invert, bias):
     v = 65535 - val16 if invert else val16
     v = v + int(bias)
     return max(0, min(65535, v))
 
-def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
+def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=None):
     frames = {}  # uni -> [512]
     pap_enabled = settings.get("per_address_priority_enabled", True)
     per_address_priority = {} if pap_enabled else None  # uni -> [512]
@@ -958,6 +969,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
     def get_frame(uni):
         if uni not in frames:
             frames[uni] = _blank_frame()
+            _ensure_output(sender, uni, priority, mirrors)
         if pap_enabled and uni not in per_address_priority:
             per_address_priority[uni] = [0] * 512
         return frames[uni]
@@ -1095,20 +1107,35 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val):
                 frame[ch_temp-1] = clamp8(fx.get("color_temp_value", 0))
                 mark_priority(uni, ch_temp)
 
+    targets = []
+    if sender:
+        targets.append(sender)
+    if mirrors:
+        targets.extend(mirrors)
+
     # push per-universe + debug
     for uni, data in frames.items():
-        _ensure_output(sender, uni, priority)
+        _ensure_output(sender, uni, priority, mirrors)
         if pap_enabled:
             pap = per_address_priority.get(uni)
             if pap is None:
                 pap = [0] * 512
-            sender[uni].per_channel_priority = pap
+            for s in targets:
+                try:
+                    s[uni].per_channel_priority = pap
+                except Exception:
+                    pass
         else:
+            for s in targets:
+                try:
+                    s[uni].per_channel_priority = None
+                except Exception:
+                    pass
+        for s in targets:
             try:
-                sender[uni].per_channel_priority = None
+                s[uni].dmx_data = data
             except Exception:
-                pass
-        sender[uni].dmx_data = data
+                continue
         _maybe_log_sacn(uni, data)
 
     return set(frames.keys())
@@ -1178,6 +1205,7 @@ class SenderThread(threading.Thread):
         super().__init__(daemon=True)
         self._stop = threading.Event()
         self.sender = None
+        self.mirror_senders = []
         self.js = None
 
         self.pan_pos = 0
@@ -1195,6 +1223,13 @@ class SenderThread(threading.Thread):
                 self.sender.stop()
             except Exception:
                 pass
+        if self.mirror_senders:
+            for extra in self.mirror_senders:
+                try:
+                    extra.stop()
+                except Exception:
+                    pass
+            self.mirror_senders = []
         self.sender = sacn.sACNsender()
         bind_addrs = get_sacn_bind_addresses()
         used_addrs = []
@@ -1242,8 +1277,22 @@ class SenderThread(threading.Thread):
                     used_addrs = [start_kwargs["bind_address"]]
                 else:
                     used_addrs = bind_addrs[:1]
-                if len(bind_addrs) > 1 and len(used_addrs) <= 1:
-                    log("sACN library does not support multiple bind addresses; using first selection")
+        extra_failures = []
+        if bind_addrs and len(bind_addrs) > 1:
+            missing = [addr for addr in bind_addrs if addr not in used_addrs]
+            for addr in missing:
+                extra, extra_used = self._create_mirror_sender(addr)
+                if not extra:
+                    extra_failures.append(addr)
+                    continue
+                self.mirror_senders.append(extra)
+                for value in extra_used:
+                    if value not in used_addrs:
+                        used_addrs.append(value)
+        if bind_addrs and len(bind_addrs) > 1 and len(used_addrs) <= 1:
+            log("sACN library does not support multiple bind addresses; using first selection")
+        if extra_failures:
+            log(f"Failed to activate additional sACN sockets for: {', '.join(extra_failures)}")
         self._active_universes.clear()
         if bind_addrs:
             if used_addrs:
@@ -1253,8 +1302,53 @@ class SenderThread(threading.Thread):
         else:
             log(f"Activated sACN (priority {settings['priority']})")
 
+    def _create_mirror_sender(self, addr):
+        addr = str(addr or "").strip()
+        if not addr:
+            return None, []
+
+        extra = sacn.sACNsender()
+        attempts = [
+            {"bind_addresses": [addr]},
+            {"bind_address": addr},
+            {},
+        ]
+
+        start_kwargs = None
+        for attempt in attempts:
+            try:
+                if attempt:
+                    extra.start(**attempt)
+                else:
+                    extra.start()
+                start_kwargs = attempt
+                break
+            except TypeError:
+                continue
+            except Exception as exc:
+                log(f"Additional sender start error on {addr}: {exc}")
+                return None, []
+
+        if start_kwargs is None:
+            try:
+                extra.start()
+            except Exception as exc:
+                log(f"Additional sender start error on {addr}: {exc}")
+                return None, []
+            start_kwargs = {}
+
+        configured, used = _apply_sender_bind_addresses(extra, [addr])
+        if not configured:
+            if start_kwargs.get("bind_addresses"):
+                used = [addr]
+            elif start_kwargs.get("bind_address"):
+                used = [start_kwargs["bind_address"]]
+            else:
+                used = [addr]
+        return extra, used
+
     def stop_sender(self, terminate=True):
-        if self.sender:
+        if self.sender or self.mirror_senders:
             try:
                 if terminate:
                     try:
@@ -1262,23 +1356,40 @@ class SenderThread(threading.Thread):
                         if not targets:
                             targets.add(settings.get("default_universe", 1))
                         pap_enabled = settings.get("per_address_priority_enabled", True)
+                        all_senders = [s for s in [self.sender] + list(self.mirror_senders) if s]
                         for uni in targets:
-                            _ensure_output(self.sender, uni, settings.get("priority", 150))
-                            if pap_enabled:
-                                self.sender[uni].per_channel_priority = [0]*512
-                            else:
+                            _ensure_output(self.sender, uni, settings.get("priority", 150), self.mirror_senders)
+                            for sender in all_senders:
+                                if not sender:
+                                    continue
+                                if pap_enabled:
+                                    try:
+                                        sender[uni].per_channel_priority = [0]*512
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        sender[uni].per_channel_priority = None
+                                    except Exception:
+                                        pass
                                 try:
-                                    self.sender[uni].per_channel_priority = None
+                                    sender[uni].dmx_data = [0]*512
                                 except Exception:
                                     pass
-                            self.sender[uni].dmx_data = [0]*512
                     except Exception:
                         pass
-                self.sender.stop()
+                if self.sender:
+                    self.sender.stop()
+                for extra in self.mirror_senders:
+                    try:
+                        extra.stop()
+                    except Exception:
+                        pass
                 log("Stream terminated")
             except Exception as e:
                 log(f"Sender stop error: {e}")
         self.sender = None
+        self.mirror_senders = []
         self._active_universes.clear()
 
     def init_joystick(self):
@@ -1584,19 +1695,28 @@ class SenderThread(threading.Thread):
                         self.tilt_pos,
                         self.dimmer,
                         self.zoom_val,
+                        self.mirror_senders,
                     )
                     pap_enabled = settings.get("per_address_priority_enabled", True)
                     for uni in prev_universes - new_universes:
                         try:
-                            _ensure_output(self.sender, uni, settings.get("priority", 150))
-                            if pap_enabled:
-                                self.sender[uni].per_channel_priority = [0]*512
-                            else:
+                            _ensure_output(self.sender, uni, settings.get("priority", 150), self.mirror_senders)
+                            targets = [s for s in [self.sender] + list(self.mirror_senders) if s]
+                            for sender in targets:
+                                if pap_enabled:
+                                    try:
+                                        sender[uni].per_channel_priority = [0]*512
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        sender[uni].per_channel_priority = None
+                                    except Exception:
+                                        pass
                                 try:
-                                    self.sender[uni].per_channel_priority = None
+                                    sender[uni].dmx_data = [0]*512
                                 except Exception:
                                     pass
-                            self.sender[uni].dmx_data = [0]*512
                         except Exception:
                             pass
                     self._active_universes = new_universes
