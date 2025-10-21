@@ -667,6 +667,10 @@ def save_settings():
         update_fixture_leds()
     except Exception:
         pass
+    try:
+        dmx_monitor.update_from_settings()
+    except Exception:
+        pass
 
 def log(line):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -937,6 +941,28 @@ def _maybe_log_sacn(uni, data):
 
 def _blank_frame(): return [0]*512
 
+def _resolve_fixture_channel(fx, channel):
+    try:
+        ch = int(channel)
+    except Exception:
+        return 0
+    if ch <= 0:
+        return 0
+
+    try:
+        start = int(fx.get("start_addr", 0))
+    except Exception:
+        start = 0
+
+    if start > 0:
+        relative_limit = max(0, 512 - start + 1)
+        if ch <= relative_limit:
+            ch = start + ch - 1
+
+    if ch < 1 or ch > 512:
+        return 0
+    return ch
+
 def _ensure_output(sender, uni, priority, mirrors=None):
     targets = []
     if sender:
@@ -953,10 +979,206 @@ def _ensure_output(sender, uni, priority, mirrors=None):
         except Exception:
             continue
 
+DEFAULT_PER_CHANNEL_FLOOR = 1  # PAP fallback for channels we do not control
+
+
 def _apply_inv_bias(val16, invert, bias):
     v = 65535 - val16 if invert else val16
     v = v + int(bias)
     return max(0, min(65535, v))
+
+
+def _reverse_inv_bias(val16, invert, bias):
+    try:
+        bias = int(bias)
+    except Exception:
+        bias = 0
+    v = max(0, min(65535, int(val16)))
+    v = v - bias
+    v = max(0, min(65535, v))
+    return 65535 - v if invert else v
+
+
+class SacnMonitor:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._frames = {}
+        self._receiver = None
+        self._universes = set()
+        self._failed = False
+
+    def _ensure_receiver(self):
+        if self._receiver or self._failed:
+            return
+        try:
+            self._receiver = sacn.sACNreceiver()
+            self._receiver.start()
+        except Exception as exc:
+            log(f"DMX monitor unavailable: {exc}")
+            self._receiver = None
+            self._failed = True
+
+    def ensure_universe(self, universe):
+        try:
+            universe = int(universe)
+        except Exception:
+            return
+        if universe <= 0:
+            return
+        self._ensure_receiver()
+        if not self._receiver or universe in self._universes:
+            return
+        self._universes.add(universe)
+        try:
+            try:
+                self._receiver.join_multicast(universe)
+            except Exception:
+                pass
+
+            @self._receiver.listen_on("universe", universe=universe)
+            def _on_packet(packet, _uni=universe):
+                data = list(packet.dmxData[:512]) if getattr(packet, "dmxData", None) is not None else []
+                if len(data) < 512:
+                    data = data + [0] * (512 - len(data))
+                with self._lock:
+                    self._frames[_uni] = data
+        except Exception as exc:
+            log(f"Failed to monitor universe {universe}: {exc}")
+
+    def update_from_settings(self):
+        for uni in gather_fixtures_universes():
+            self.ensure_universe(uni)
+
+    def get_value(self, universe, channel):
+        try:
+            channel = int(channel)
+        except Exception:
+            return None
+        if channel <= 0:
+            return None
+        with self._lock:
+            frame = self._frames.get(int(universe))
+            if not frame:
+                return None
+            if channel > len(frame):
+                return None
+            return frame[channel - 1]
+
+
+dmx_monitor = SacnMonitor()
+
+
+def gather_fixtures_universes():
+    universes = set()
+    default_uni = settings.get("default_universe", settings.get("universe", 1))
+    try:
+        universes.add(int(default_uni))
+    except Exception:
+        pass
+    use_multi = settings.get("multi_universe_enabled", False)
+    for fx in settings.get("fixtures", []) or []:
+        try:
+            uni = int(fx.get("universe", default_uni))
+        except Exception:
+            uni = default_uni
+        if not use_multi:
+            uni = default_uni
+        try:
+            universes.add(int(uni))
+        except Exception:
+            continue
+    return universes
+
+
+def capture_initial_fixture_state():
+    try:
+        dmx_monitor.update_from_settings()
+    except Exception:
+        return {}
+
+    use_multi = settings.get("multi_universe_enabled", False)
+    default_uni = settings.get("default_universe", settings.get("universe", 1))
+
+    fixtures = [fx for fx in settings.get("fixtures", []) if fx.get("enabled", False)]
+    candidates = fixtures if fixtures else [None]
+
+    result = {}
+
+    def capture_for_fixture(fx):
+        target = {}
+        if fx is None:
+            fx = {
+                "universe": default_uni,
+                "pan_coarse": settings.get("ch_pan_coarse", 0),
+                "pan_fine": settings.get("ch_pan_fine", 0),
+                "tilt_coarse": settings.get("ch_tilt_coarse", 0),
+                "tilt_fine": settings.get("ch_tilt_fine", 0),
+                "dimmer": settings.get("ch_dimmer", 0),
+                "zoom": settings.get("ch_zoom", 0),
+                "zoom_fine": settings.get("ch_zoom_fine", 0),
+                "invert_pan": settings.get("invert_pan", False),
+                "invert_tilt": settings.get("invert_tilt", False),
+                "pan_bias": settings.get("pan_bias", 0),
+                "tilt_bias": settings.get("tilt_bias", 0),
+            }
+        uni = fx.get("universe", default_uni)
+        if not use_multi:
+            uni = default_uni
+        dmx_monitor.ensure_universe(uni)
+
+        pc = _resolve_fixture_channel(fx, fx.get("pan_coarse", 0))
+        pf = _resolve_fixture_channel(fx, fx.get("pan_fine", 0))
+        tc = _resolve_fixture_channel(fx, fx.get("tilt_coarse", 0))
+        tf = _resolve_fixture_channel(fx, fx.get("tilt_fine", 0))
+        dc = _resolve_fixture_channel(fx, fx.get("dimmer", 0))
+        zc = _resolve_fixture_channel(fx, fx.get("zoom", 0))
+        zf = _resolve_fixture_channel(fx, fx.get("zoom_fine", 0))
+
+        pan_val = None
+        tilt_val = None
+        if pc:
+            coarse = dmx_monitor.get_value(uni, pc)
+            fine = dmx_monitor.get_value(uni, pf) if pf else 0
+            if coarse is not None:
+                pan_raw = ((coarse or 0) << 8) | (fine or 0)
+                pan_val = _reverse_inv_bias(pan_raw, fx.get("invert_pan", False), fx.get("pan_bias", 0))
+                pan_val = max(settings["pan_min"], min(settings["pan_max"], pan_val))
+        if tc:
+            coarse = dmx_monitor.get_value(uni, tc)
+            fine = dmx_monitor.get_value(uni, tf) if tf else 0
+            if coarse is not None:
+                tilt_raw = ((coarse or 0) << 8) | (fine or 0)
+                tilt_val = _reverse_inv_bias(tilt_raw, fx.get("invert_tilt", False), fx.get("tilt_bias", 0))
+                tilt_val = max(settings["tilt_min"], min(settings["tilt_max"], tilt_val))
+        if pan_val is not None:
+            target["pan"] = pan_val
+        if tilt_val is not None:
+            target["tilt"] = tilt_val
+
+        dimmer_val = dmx_monitor.get_value(uni, dc) if dc else None
+        if dimmer_val is not None:
+            target["dimmer"] = dimmer_val
+
+        if zc:
+            z_coarse = dmx_monitor.get_value(uni, zc)
+            z_fine = dmx_monitor.get_value(uni, zf) if zf else 0
+            if z_coarse is not None:
+                if zf:
+                    target["zoom"] = ((z_coarse or 0) << 8) | (z_fine or 0)
+                else:
+                    target["zoom"] = z_coarse
+        return target
+
+    for fx in candidates:
+        captured = capture_for_fixture(fx)
+        for key, value in captured.items():
+            if key not in result and value is not None:
+                result[key] = value
+        if {"pan", "tilt", "dimmer", "zoom"}.issubset(result.keys()):
+            break
+
+    return result
+
 
 def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=None):
     frames = {}  # uni -> [512]
@@ -971,7 +1193,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
             frames[uni] = _blank_frame()
             _ensure_output(sender, uni, priority, mirrors)
         if pap_enabled and uni not in per_address_priority:
-            per_address_priority[uni] = [0] * 512
+            per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
         return frames[uni]
 
     def mark_priority(uni, ch):
@@ -979,7 +1201,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
             return
         if ch and 1 <= ch <= 512:
             if uni not in per_address_priority:
-                per_address_priority[uni] = [0] * 512
+                per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
             per_address_priority[uni][ch - 1] = priority
 
     fixtures = settings.get("fixtures", [])
@@ -1027,29 +1249,6 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
             frame[ch_temp-1] = clamp8(settings.get("color_temp_value", 0))
             mark_priority(uni, ch_temp)
     else:
-        def resolve_channel(fx, channel):
-            try:
-                ch = int(channel)
-            except Exception:
-                return 0
-            if ch <= 0:
-                return 0
-
-            try:
-                start = int(fx.get("start_addr", 0))
-            except Exception:
-                start = 0
-
-            if start > 0:
-                # Treat channels as relative offsets when they fit within the fixture footprint.
-                relative_limit = max(0, 512 - start + 1)
-                if ch <= relative_limit:
-                    ch = start + ch - 1
-
-            if ch < 1 or ch > 512:
-                return 0
-            return ch
-
         for fx in fixtures:
             if not fx.get("enabled", False):
                 continue
@@ -1066,8 +1265,10 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
             t16 = max(settings["tilt_min"], min(settings["tilt_max"], t16))
 
             # Pan/Tilt
-            pc, pf = resolve_channel(fx, fx.get("pan_coarse", 0)), resolve_channel(fx, fx.get("pan_fine", 0))
-            tc, tf = resolve_channel(fx, fx.get("tilt_coarse", 0)), resolve_channel(fx, fx.get("tilt_fine", 0))
+            pc = _resolve_fixture_channel(fx, fx.get("pan_coarse", 0))
+            pf = _resolve_fixture_channel(fx, fx.get("pan_fine", 0))
+            tc = _resolve_fixture_channel(fx, fx.get("tilt_coarse", 0))
+            tf = _resolve_fixture_channel(fx, fx.get("tilt_fine", 0))
             pC, pF = to16(p16)
             tC, tF = to16(t16)
             if pc>0:
@@ -1084,13 +1285,14 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
                 mark_priority(uni, tf)
 
             # Dimmer
-            dC = resolve_channel(fx, fx.get("dimmer", 0))
+            dC = _resolve_fixture_channel(fx, fx.get("dimmer", 0))
             if dC>0:
                 frame[dC-1] = clamp8(dimmer8)
                 mark_priority(uni, dC)
 
             # Zoom
-            zC, zF = resolve_channel(fx, fx.get("zoom", 0)), resolve_channel(fx, fx.get("zoom_fine", 0))
+            zC = _resolve_fixture_channel(fx, fx.get("zoom", 0))
+            zF = _resolve_fixture_channel(fx, fx.get("zoom_fine", 0))
             if zC>0:
                 if zF>0:
                     zC8, zF8 = to16(max(0, min(65535, int(zoom_val))))
@@ -1102,7 +1304,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
                     frame[zC-1] = clamp8(zoom_val)
                     mark_priority(uni, zC)
 
-            ch_temp = resolve_channel(fx, fx.get("color_temp_channel", 0))
+            ch_temp = _resolve_fixture_channel(fx, fx.get("color_temp_channel", 0))
             if ch_temp and ch_temp > 0:
                 frame[ch_temp-1] = clamp8(fx.get("color_temp_value", 0))
                 mark_priority(uni, ch_temp)
@@ -1119,7 +1321,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
         if pap_enabled:
             pap = per_address_priority.get(uni)
             if pap is None:
-                pap = [0] * 512
+                pap = [DEFAULT_PER_CHANNEL_FLOOR] * 512
             for s in targets:
                 try:
                     s[uni].per_channel_priority = pap
@@ -1364,7 +1566,7 @@ class SenderThread(threading.Thread):
                                     continue
                                 if pap_enabled:
                                     try:
-                                        sender[uni].per_channel_priority = [0]*512
+                                        sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
                                     except Exception:
                                         pass
                                 else:
@@ -1626,6 +1828,19 @@ class SenderThread(threading.Thread):
 
                 if self.btn(settings["btn_activate"]) and now-last_activate>0.15 and not status["active"]:
                     with state_lock:
+                        try:
+                            captured = capture_initial_fixture_state()
+                        except Exception:
+                            captured = {}
+                        if captured:
+                            if "pan" in captured:
+                                self.pan_pos = clamp16(captured["pan"])
+                            if "tilt" in captured:
+                                self.tilt_pos = clamp16(captured["tilt"])
+                            if "dimmer" in captured:
+                                self.dimmer = clamp8(captured["dimmer"])
+                            if "zoom" in captured:
+                                self.zoom_val = clamp16(captured["zoom"])
                         self.start_sender()
                         status["active"] = True
                         status["error"] = False
@@ -1705,7 +1920,7 @@ class SenderThread(threading.Thread):
                             for sender in targets:
                                 if pap_enabled:
                                     try:
-                                        sender[uni].per_channel_priority = [0]*512
+                                        sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
                                     except Exception:
                                         pass
                                 else:
