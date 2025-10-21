@@ -1,6 +1,6 @@
-import os, json, time, threading, queue, csv, io, sys, subprocess, socket, re
+import os, json, time, threading, queue, csv, io, sys, subprocess, socket, re, tempfile
 from datetime import datetime
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_file
 import pygame
 import sacn
 
@@ -129,6 +129,18 @@ virtual_state = {
     "zaxis": 0.0,     # rocker axis in [-1, 1]
     "buttons": {}     # { index:int -> 0/1 }
     }
+
+capture_lock = threading.Lock()
+packet_capture = {
+    "active": False,
+    "interface": None,
+    "path": None,
+    "filename": None,
+    "started": None,
+    "stopped": None,
+    "process": None,
+    "error": None,
+}
 
 def vclamp(v):
     try:
@@ -301,6 +313,212 @@ def list_network_interfaces():
 
 def get_sacn_bind_addresses():
     return sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
+
+
+# ---------------- Packet capture helpers ----------------
+
+def _capture_ts_to_iso(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.utcfromtimestamp(float(ts)).isoformat() + "Z"
+    except Exception:
+        return None
+
+
+def _safe_capture_filename(interface):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", interface or "iface")
+    now = datetime.utcnow()
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
+    fractional = now.strftime("%f")[:3]
+    return f"sacn_capture_{safe}_{timestamp}-{fractional}.pcap"
+
+
+def _monitor_packet_capture(proc):
+    stderr_text = ""
+    try:
+        if proc.stderr:
+            stderr_text = proc.stderr.read() or ""
+    except Exception:
+        stderr_text = ""
+    finally:
+        try:
+            if proc.stderr:
+                proc.stderr.close()
+        except Exception:
+            pass
+
+    rc = None
+    try:
+        rc = proc.wait()
+    except Exception:
+        rc = None
+
+    with capture_lock:
+        if packet_capture.get("process") is proc:
+            packet_capture["process"] = None
+            packet_capture["active"] = False
+            packet_capture["stopped"] = time.time()
+            if rc not in (0, None) and not packet_capture.get("error"):
+                packet_capture["error"] = (stderr_text or "tcpdump exited with an error").strip()
+
+    if rc == 0:
+        log("Packet capture finished")
+    elif rc not in (None, 0):
+        log(f"Packet capture exited with code {rc}")
+
+
+def start_packet_capture(interface_name):
+    iface = str(interface_name or "").strip()
+    if not iface:
+        return False, "Interface is required"
+
+    filename = _safe_capture_filename(iface)
+    path = os.path.join(tempfile.gettempdir(), filename)
+
+    with capture_lock:
+        if packet_capture.get("active") and packet_capture.get("process"):
+            return False, "Packet capture is already running"
+        previous_path = packet_capture.get("path")
+
+    command = [
+        "tcpdump",
+        "-i",
+        iface,
+        "-n",
+        "-w",
+        path,
+        "udp",
+        "port",
+        "5568",
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        message = "tcpdump is not available. Install tcpdump to enable packet capture."
+        with capture_lock:
+            packet_capture["error"] = message
+        log(f"Packet capture failed to start: {message}")
+        return False, message
+    except PermissionError:
+        message = "Permission denied while starting tcpdump. Run with elevated privileges."
+        with capture_lock:
+            packet_capture["error"] = message
+        log(f"Packet capture failed to start: {message}")
+        return False, message
+    except Exception as exc:
+        message = f"Failed to start tcpdump: {exc}"
+        with capture_lock:
+            packet_capture["error"] = message
+        log(f"Packet capture failed to start: {message}")
+        return False, message
+
+    time.sleep(0.3)
+    if proc.poll() is not None:
+        err_text = ""
+        try:
+            if proc.stderr:
+                err_text = proc.stderr.read().strip()
+        except Exception:
+            err_text = ""
+        finally:
+            try:
+                if proc.stderr:
+                    proc.stderr.close()
+            except Exception:
+                pass
+        message = err_text or "tcpdump exited immediately"
+        with capture_lock:
+            packet_capture["error"] = message
+        log(f"Packet capture failed to start: {message}")
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        return False, message
+
+    with capture_lock:
+        if previous_path and previous_path != path and os.path.exists(previous_path):
+            try:
+                os.remove(previous_path)
+            except Exception:
+                pass
+        packet_capture.update({
+            "interface": iface,
+            "filename": filename,
+            "path": path,
+            "started": time.time(),
+            "stopped": None,
+            "error": None,
+            "active": True,
+            "process": proc,
+        })
+
+    threading.Thread(target=_monitor_packet_capture, args=(proc,), daemon=True).start()
+    log(f"Packet capture started on {iface}")
+    return True, None
+
+
+def stop_packet_capture():
+    with capture_lock:
+        proc = packet_capture.get("process")
+        if not proc:
+            if packet_capture.get("active"):
+                packet_capture["active"] = False
+            return False, "No packet capture is currently running"
+        packet_capture["active"] = False
+
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    log("Packet capture stopped")
+    return True, None
+
+
+def get_packet_capture_status():
+    with capture_lock:
+        data = {
+            "active": bool(packet_capture.get("active")),
+            "interface": packet_capture.get("interface"),
+            "filename": packet_capture.get("filename"),
+            "error": packet_capture.get("error"),
+            "started_at": _capture_ts_to_iso(packet_capture.get("started")),
+            "stopped_at": _capture_ts_to_iso(packet_capture.get("stopped")),
+        }
+        path = packet_capture.get("path")
+        active = bool(packet_capture.get("active"))
+
+    size = 0
+    if path and os.path.exists(path):
+        try:
+            size = os.path.getsize(path)
+        except Exception:
+            size = 0
+
+    data["filesize"] = size
+    data["download_ready"] = bool(path and os.path.exists(path) and size > 0 and not active)
+    data["active"] = bool(active)
+    return data
 
 
 def _apply_sender_bind_addresses(sender, bind_addrs):
@@ -1616,6 +1834,23 @@ INDEX_HTML = """
           </div>
 
           <div class="card wide">
+            <h3>Packet Capture</h3>
+            <label for="pcap-interface">Interface</label>
+            <select id="pcap-interface" disabled>
+              <option value="">Loading…</option>
+            </select>
+            <small class="muted" id="pcap-interface-hint">Captures UDP 5568 traffic (sACN). Requires tcpdump with sufficient privileges.</small>
+            <p class="small muted" id="pcap-no-ifaces" style="display:none;margin-top:4px;">No network adapters detected.</p>
+            <div class="switch" style="margin-top:12px">
+              <button class="btn" id="pcap-start" onclick="startPacketCapture()">Start Capture</button>
+              <button class="btn danger" id="pcap-stop" onclick="stopPacketCapture()" disabled>Stop</button>
+              <a class="btn" id="pcap-download" href="#" style="display:none">Download PCAP</a>
+            </div>
+            <p class="small muted" id="pcap-status">Idle</p>
+            <p class="small" id="pcap-error" style="display:none;background:#4c1d1d;color:#fecaca;padding:6px 10px;border-radius:8px;margin-top:4px;"></p>
+          </div>
+
+          <div class="card wide">
             <h3>Logs</h3>
             <textarea id="logs" readonly></textarea>
           </div>
@@ -1863,6 +2098,8 @@ Example:
     const FIXTURE_LIMIT = 6;
 
     let NETWORK_ADAPTERS = null;
+    let CAPTURE_STATE = null;
+    let CAPTURE_POLL_TIMER = null;
 
     async function ensureNetworkAdapters(){
       if(Array.isArray(NETWORK_ADAPTERS)) return NETWORK_ADAPTERS;
@@ -1889,6 +2126,54 @@ Example:
         });
       }
       hidden.value = JSON.stringify(selected);
+    }
+
+    function renderCaptureInterfaceOptions(selectedIface){
+      const select = document.getElementById('pcap-interface');
+      const noMsg = document.getElementById('pcap-no-ifaces');
+      if(!select){
+        if(noMsg) noMsg.style.display = 'none';
+        return;
+      }
+      const adapters = Array.isArray(NETWORK_ADAPTERS) ? NETWORK_ADAPTERS : [];
+      const seen = new Set();
+      const previous = select.value;
+      const target = selectedIface || previous || '';
+      select.innerHTML = '';
+
+      if(!adapters.length){
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No adapters available';
+        select.appendChild(opt);
+        select.value = '';
+        select.disabled = true;
+        if(noMsg) noMsg.style.display = 'block';
+        return;
+      }
+
+      if(noMsg) noMsg.style.display = 'none';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select interface…';
+      select.appendChild(placeholder);
+
+      adapters.forEach(adapter => {
+        const name = adapter && adapter.name ? String(adapter.name) : '';
+        if(!name || seen.has(name)) return;
+        seen.add(name);
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = adapter.address ? `${name} – ${adapter.address}` : name;
+        select.appendChild(option);
+      });
+
+      if(target && seen.has(target)){
+        select.value = target;
+      }else{
+        select.value = '';
+      }
+      select.disabled = false;
     }
 
     function renderNetworkAdapters(selected){
@@ -1943,11 +2228,203 @@ Example:
         container.dataset.bound = 'true';
       }
       syncSacnInterfaces();
+      renderCaptureInterfaceOptions(CAPTURE_STATE && CAPTURE_STATE.interface ? CAPTURE_STATE.interface : '');
     }
 
     async function refreshNetworkAdapters(selected){
       await ensureNetworkAdapters();
       renderNetworkAdapters(selected);
+    }
+
+    function formatBytes(bytes){
+      const value = Number(bytes);
+      if(!Number.isFinite(value) || value <= 0){
+        return '0 B';
+      }
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let val = value;
+      let idx = 0;
+      while(val >= 1024 && idx < units.length - 1){
+        val /= 1024;
+        idx += 1;
+      }
+      const decimals = val >= 10 || idx === 0 ? 0 : 1;
+      return `${val.toFixed(decimals)} ${units[idx]}`;
+    }
+
+    function formatDuration(seconds){
+      const total = Math.max(0, Number(seconds) || 0);
+      if(total >= 3600){
+        const hours = Math.floor(total / 3600);
+        const mins = Math.floor((total % 3600) / 60);
+        return `${hours}h ${mins}m`;
+      }
+      if(total >= 60){
+        const mins = Math.floor(total / 60);
+        const secs = Math.floor(total % 60);
+        return `${mins}m ${secs}s`;
+      }
+      return `${Math.floor(total)}s`;
+    }
+
+    function showCaptureError(message){
+      const el = document.getElementById('pcap-error');
+      if(!el) return;
+      if(message){
+        el.textContent = message;
+        el.style.display = 'block';
+      }else{
+        el.textContent = '';
+        el.style.display = 'none';
+      }
+    }
+
+    function parseErrorMessage(err){
+      if(!err) return 'Unexpected error';
+      if(typeof err === 'string') return err;
+      if(err.error) return err.error;
+      if(err.message){
+        try{
+          const data = JSON.parse(err.message);
+          if(data && data.error) return data.error;
+        }catch(_){ }
+        return err.message;
+      }
+      return String(err);
+    }
+
+    function updateCaptureUI(state){
+      CAPTURE_STATE = state || {};
+      const select = document.getElementById('pcap-interface');
+      const startBtn = document.getElementById('pcap-start');
+      const stopBtn = document.getElementById('pcap-stop');
+      const statusEl = document.getElementById('pcap-status');
+      const downloadLink = document.getElementById('pcap-download');
+      const adapters = Array.isArray(NETWORK_ADAPTERS) ? NETWORK_ADAPTERS : [];
+      renderCaptureInterfaceOptions(CAPTURE_STATE.interface || '');
+
+      const active = !!CAPTURE_STATE.active;
+      const iface = CAPTURE_STATE.interface || (select ? select.value : '');
+      const size = Number(CAPTURE_STATE.filesize || 0);
+
+      if(select){
+        const hasAdapters = adapters.length > 0;
+        if(iface && hasAdapters && !select.value){
+          select.value = iface;
+        }
+        select.disabled = active || !hasAdapters;
+      }
+
+      if(startBtn){
+        const ready = select && select.value;
+        startBtn.disabled = active || !ready;
+      }
+
+      if(stopBtn){
+        stopBtn.disabled = !active;
+      }
+
+      if(downloadLink){
+        if(CAPTURE_STATE.download_ready){
+          downloadLink.style.display = 'inline-block';
+          downloadLink.href = `/api/capture/download?ts=${Date.now()}`;
+        }else{
+          downloadLink.style.display = 'none';
+          downloadLink.href = '#';
+        }
+      }
+
+      if(statusEl){
+        let text = 'Idle';
+        if(active){
+          text = `Capturing on ${iface || 'selected interface'}`;
+          if(CAPTURE_STATE.started_at){
+            try{
+              const started = new Date(CAPTURE_STATE.started_at);
+              const seconds = (Date.now() - started.getTime()) / 1000;
+              text += ` • ${formatDuration(seconds)}`;
+            }catch(_){ }
+          }
+          if(size > 0){
+            text += ` • ${formatBytes(size)}`;
+          }
+        }else if(CAPTURE_STATE.download_ready){
+          text = `Capture ready (${formatBytes(size)})`;
+          if(iface) text += ` from ${iface}`;
+        }else if(iface){
+          text = `Last capture on ${iface}`;
+        }
+        statusEl.textContent = text;
+      }
+
+      if(CAPTURE_STATE.error){
+        showCaptureError(CAPTURE_STATE.error);
+      }else{
+        showCaptureError('');
+      }
+    }
+
+    async function refreshCaptureState(){
+      try{
+        await ensureNetworkAdapters();
+        const state = await fetchJSON('/api/capture/status');
+        updateCaptureUI(state);
+      }catch(err){
+        console.error('Failed to refresh capture state', err);
+      }
+    }
+
+    async function startPacketCapture(){
+      const select = document.getElementById('pcap-interface');
+      const startBtn = document.getElementById('pcap-start');
+      if(!select || !select.value){
+        showCaptureError('Select an interface before starting a capture.');
+        if(startBtn) startBtn.disabled = false;
+        return;
+      }
+      showCaptureError('');
+      if(startBtn) startBtn.disabled = true;
+      try{
+        const state = await fetchJSON('/api/capture/start', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ interface: select.value })
+        });
+        updateCaptureUI(state);
+      }catch(err){
+        const message = parseErrorMessage(err);
+        const state = Object.assign({}, CAPTURE_STATE || {});
+        state.error = message;
+        updateCaptureUI(state);
+      }finally{
+        if(startBtn){
+          const ready = select && select.value;
+          const active = CAPTURE_STATE && CAPTURE_STATE.active;
+          startBtn.disabled = !!active || !ready;
+        }
+      }
+    }
+
+    async function stopPacketCapture(){
+      const stopBtn = document.getElementById('pcap-stop');
+      if(stopBtn) stopBtn.disabled = true;
+      try{
+        const state = await fetchJSON('/api/capture/stop', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'}
+        });
+        updateCaptureUI(state);
+      }catch(err){
+        const message = parseErrorMessage(err);
+        const state = Object.assign({}, CAPTURE_STATE || {});
+        state.error = message;
+        updateCaptureUI(state);
+      }finally{
+        if(stopBtn){
+          const active = CAPTURE_STATE && CAPTURE_STATE.active;
+          stopBtn.disabled = !active;
+        }
+      }
     }
 
     function setActiveTab(tab){
@@ -2499,6 +2976,10 @@ Example:
     loadFixtures();
     setInterval(refresh, 1000);
     refresh();
+    refreshCaptureState();
+    if(!CAPTURE_POLL_TIMER){
+      CAPTURE_POLL_TIMER = setInterval(refreshCaptureState, 5000);
+    }
     </script>
     </body></html>
     """
@@ -2564,6 +3045,63 @@ def api_network_adapters():
         "adapters": list_network_interfaces(),
         "selected": get_sacn_bind_addresses()
     })
+
+
+@APP.route("/api/capture/status", methods=["GET"])
+def api_capture_status():
+    return jsonify(get_packet_capture_status())
+
+
+def _resolve_capture_interface(payload):
+    iface = str(payload.get("interface") or payload.get("name") or "").strip()
+    if iface:
+        return iface
+    address = str(payload.get("address") or "").strip()
+    if not address:
+        return ""
+    for adapter in list_network_interfaces():
+        if str(adapter.get("address")) == address:
+            return str(adapter.get("name", "")).strip()
+    return ""
+
+
+@APP.route("/api/capture/start", methods=["POST"])
+def api_capture_start():
+    payload = request.get_json(force=True, silent=True) or {}
+    iface = _resolve_capture_interface(payload)
+    if not iface:
+        return jsonify({"error": "Interface is required"}), 400
+    ok, error = start_packet_capture(iface)
+    if not ok:
+        return jsonify({"error": error}), 400
+    return jsonify(get_packet_capture_status())
+
+
+@APP.route("/api/capture/stop", methods=["POST"])
+def api_capture_stop():
+    ok, error = stop_packet_capture()
+    if not ok and error:
+        return jsonify({"error": error}), 400
+    return jsonify(get_packet_capture_status())
+
+
+@APP.route("/api/capture/download", methods=["GET"])
+def api_capture_download():
+    with capture_lock:
+        path = packet_capture.get("path")
+        filename = packet_capture.get("filename") or "capture.pcap"
+        active = bool(packet_capture.get("active"))
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "No capture available"}), 404
+    if active:
+        return jsonify({"error": "Stop the capture before downloading"}), 400
+    return send_file(
+        path,
+        mimetype="application/vnd.tcpdump.pcap",
+        as_attachment=True,
+        download_name=filename,
+        conditional=True,
+    )
 
 @APP.route("/api/settings", methods=["GET","POST"])
 def api_settings():
