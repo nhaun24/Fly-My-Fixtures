@@ -979,7 +979,11 @@ def _ensure_output(sender, uni, priority, mirrors=None):
         except Exception:
             continue
 
-DEFAULT_PER_CHANNEL_FLOOR = 1  # PAP fallback for channels we do not control
+# When per-address priority is enabled, unpatched channels should still hold the
+# maximum priority expected by external fixtures. The spec for this deployment
+# treats priority "10" as the highest value, so we default idle channels to 10
+# instead of 1 to avoid other fixtures dropping to zero.
+DEFAULT_PER_CHANNEL_FLOOR = 10  # PAP fallback for channels we do not control
 
 
 def _apply_inv_bias(val16, invert, bias):
