@@ -1419,6 +1419,8 @@ class SenderThread(threading.Thread):
         self._debug_prev_buttons = None
         self._debug_prev_axes = None
         self._active_universes = set()
+        self._has_streamed = False
+        self._last_stream_universes = set()
 
     def start_sender(self):
         if self.sender:
@@ -1497,6 +1499,8 @@ class SenderThread(threading.Thread):
         if extra_failures:
             log(f"Failed to activate additional sACN sockets for: {', '.join(extra_failures)}")
         self._active_universes.clear()
+        self._last_stream_universes.clear()
+        self._has_streamed = False
         if bind_addrs:
             if used_addrs:
                 log(f"Activated sACN (priority {settings['priority']}) via {', '.join(used_addrs)}")
@@ -1555,9 +1559,10 @@ class SenderThread(threading.Thread):
             try:
                 if terminate:
                     try:
-                        targets = set(self._active_universes)
-                        if not targets:
-                            targets.add(settings.get("default_universe", 1))
+                        if not self._has_streamed:
+                            targets = set()
+                        else:
+                            targets = set(self._active_universes) or set(self._last_stream_universes)
                         pap_enabled = settings.get("per_address_priority_enabled", True)
                         all_senders = [s for s in [self.sender] + list(self.mirror_senders) if s]
                         for uni in targets:
@@ -1594,6 +1599,8 @@ class SenderThread(threading.Thread):
         self.sender = None
         self.mirror_senders = []
         self._active_universes.clear()
+        self._last_stream_universes.clear()
+        self._has_streamed = False
 
     def init_joystick(self):
         pygame.joystick.quit(); pygame.joystick.init()
@@ -1913,6 +1920,9 @@ class SenderThread(threading.Thread):
                         self.zoom_val,
                         self.mirror_senders,
                     )
+                    if new_universes:
+                        self._has_streamed = True
+                        self._last_stream_universes.update(new_universes)
                     pap_enabled = settings.get("per_address_priority_enabled", True)
                     for uni in prev_universes - new_universes:
                         try:
@@ -1936,6 +1946,8 @@ class SenderThread(threading.Thread):
                         except Exception:
                             pass
                     self._active_universes = new_universes
+                    if new_universes:
+                        self._last_stream_universes = set(new_universes)
                     status["last_frame_ts"] = time.time()
 
                 clock.tick(settings["fps"])
