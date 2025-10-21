@@ -1187,11 +1187,12 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
     use_multi = settings.get("multi_universe_enabled", False)
     default_uni = settings.get("default_universe", settings.get("universe", 1))
     priority = settings.get("priority", 150)
+    frame_priority = DEFAULT_PER_CHANNEL_FLOOR if pap_enabled else priority
 
     def get_frame(uni):
         if uni not in frames:
             frames[uni] = _blank_frame()
-            _ensure_output(sender, uni, priority, mirrors)
+            _ensure_output(sender, uni, frame_priority, mirrors)
         if pap_enabled and uni not in per_address_priority:
             per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
         return frames[uni]
@@ -1317,7 +1318,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
 
     # push per-universe + debug
     for uni, data in frames.items():
-        _ensure_output(sender, uni, priority, mirrors)
+        _ensure_output(sender, uni, frame_priority, mirrors)
         if pap_enabled:
             pap = per_address_priority.get(uni)
             if pap is None:
@@ -1560,7 +1561,7 @@ class SenderThread(threading.Thread):
                         pap_enabled = settings.get("per_address_priority_enabled", True)
                         all_senders = [s for s in [self.sender] + list(self.mirror_senders) if s]
                         for uni in targets:
-                            _ensure_output(self.sender, uni, settings.get("priority", 150), self.mirror_senders)
+                            _ensure_output(self.sender, uni, DEFAULT_PER_CHANNEL_FLOOR, self.mirror_senders)
                             for sender in all_senders:
                                 if not sender:
                                     continue
@@ -1915,7 +1916,7 @@ class SenderThread(threading.Thread):
                     pap_enabled = settings.get("per_address_priority_enabled", True)
                     for uni in prev_universes - new_universes:
                         try:
-                            _ensure_output(self.sender, uni, settings.get("priority", 150), self.mirror_senders)
+                            _ensure_output(self.sender, uni, DEFAULT_PER_CHANNEL_FLOOR, self.mirror_senders)
                             targets = [s for s in [self.sender] + list(self.mirror_senders) if s]
                             for sender in targets:
                                 if pap_enabled:
