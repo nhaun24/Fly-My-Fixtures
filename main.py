@@ -963,6 +963,21 @@ def _resolve_fixture_channel(fx, channel):
         return 0
     return ch
 
+def _coerce_priority(value, fallback=None):
+    try:
+        prio = int(value)
+    except Exception:
+        prio = None
+    if prio is None and fallback is not None:
+        try:
+            prio = int(fallback)
+        except Exception:
+            prio = None
+    if prio is None:
+        prio = DEFAULTS.get("priority", 150)
+    return max(0, min(200, prio))
+
+
 def _ensure_output(sender, uni, priority, mirrors=None):
     targets = []
     if sender:
@@ -971,10 +986,11 @@ def _ensure_output(sender, uni, priority, mirrors=None):
         targets.extend(mirrors)
     if not targets:
         return
+    prio = _coerce_priority(priority)
     for s in targets:
         try:
             s.activate_output(uni)
-            s[uni].priority = priority
+            s[uni].priority = prio
             s[uni].multicast = True
         except Exception:
             continue
@@ -1190,7 +1206,7 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
     per_address_priority = {} if pap_enabled else None  # uni -> [512]
     use_multi = settings.get("multi_universe_enabled", False)
     default_uni = settings.get("default_universe", settings.get("universe", 1))
-    priority = settings.get("priority", 150)
+    priority = _coerce_priority(settings.get("priority"), DEFAULTS.get("priority", 150))
     frame_priority = DEFAULT_PER_CHANNEL_FLOOR if pap_enabled else priority
 
     def get_frame(uni):
