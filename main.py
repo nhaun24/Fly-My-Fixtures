@@ -1,4 +1,4 @@
-import os, json, time, threading, queue, csv, io, sys, subprocess, socket, inspect, re
+import os, json, time, threading, queue, csv, io, sys, subprocess, socket, re
 from datetime import datetime
 from flask import Flask, request, jsonify, Response
 import pygame
@@ -301,6 +301,64 @@ def list_network_interfaces():
 
 def get_sacn_bind_addresses():
     return sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
+
+
+def _apply_sender_bind_addresses(sender, bind_addrs):
+    """Attempt to configure `sender` to bind to ``bind_addrs``.
+
+    Returns a tuple ``(configured: bool, used_addrs: list[str])`` describing the
+    result.  The helper tries attribute assignment as well as legacy setter
+    helpers so we gracefully support different python-sACN versions without
+    relying on introspection data that may be missing on C-implemented methods.
+    """
+
+    def _normalize_used(value, fallback):
+        if not value:
+            value = fallback
+        if isinstance(value, str):
+            return [value]
+        try:
+            return [str(v) for v in value]
+        except Exception:
+            return [str(value)]
+
+    if not bind_addrs:
+        return False, []
+
+    attr_attempts = [
+        ("bind_addresses", bind_addrs),
+        ("bind_address", bind_addrs[0]),
+    ]
+
+    for attr, value in attr_attempts:
+        if not hasattr(sender, attr):
+            continue
+        try:
+            setattr(sender, attr, value)
+        except Exception:
+            continue
+        try:
+            current = getattr(sender, attr)
+        except Exception:
+            current = None
+        return True, _normalize_used(current, value)
+
+    setter_attempts = [
+        ("set_bind_addresses", bind_addrs),
+        ("set_bind_address", bind_addrs[0]),
+    ]
+
+    for name, value in setter_attempts:
+        method = getattr(sender, name, None)
+        if not callable(method):
+            continue
+        try:
+            method(value)
+        except Exception:
+            continue
+        return True, _normalize_used(None, value)
+
+    return False, []
 
 def fixtures_to_csv(fixtures):
     buf = io.StringIO()
@@ -921,44 +979,44 @@ class SenderThread(threading.Thread):
                 pass
         self.sender = sacn.sACNsender()
         bind_addrs = get_sacn_bind_addresses()
-        start_kwargs = {}
         used_addrs = []
-        try:
-            sig = inspect.signature(self.sender.start)
-        except Exception:
-            sig = None
+
+        start_attempts = []
         if bind_addrs:
-            if sig and "bind_addresses" in sig.parameters:
-                start_kwargs["bind_addresses"] = bind_addrs
-            elif sig and "bind_address" in sig.parameters:
-                start_kwargs["bind_address"] = bind_addrs[0]
-        try:
-            if start_kwargs:
-                self.sender.start(**start_kwargs)
-            else:
-                self.sender.start()
-        except TypeError:
+            start_attempts.append({"bind_addresses": bind_addrs})
+            start_attempts.append({"bind_address": bind_addrs[0]})
+        start_attempts.append({})
+
+        start_kwargs = None
+        for attempt in start_attempts:
+            try:
+                if attempt:
+                    self.sender.start(**attempt)
+                else:
+                    self.sender.start()
+                start_kwargs = attempt
+                break
+            except TypeError:
+                continue
+            except Exception as e:
+                log(f"Sender start error: {e}")
+                raise
+
+        if start_kwargs is None:
+            # Final safety net; shouldn't normally execute but keeps the sender usable
             self.sender.start()
-        except Exception as e:
-            log(f"Sender start error: {e}")
-            raise
+            start_kwargs = {}
 
         configured = False
         if bind_addrs:
-            if hasattr(self.sender, "bind_addresses"):
-                try:
-                    self.sender.bind_addresses = bind_addrs
-                    configured = True
-                    used_addrs = list(bind_addrs)
-                except Exception:
-                    pass
-            if not configured and hasattr(self.sender, "bind_address"):
-                try:
-                    self.sender.bind_address = bind_addrs[0]
-                    configured = True
-                    used_addrs = [bind_addrs[0]]
-                except Exception:
-                    pass
+            if start_kwargs.get("bind_addresses"):
+                used_addrs = list(bind_addrs)
+                configured = True
+            elif start_kwargs.get("bind_address"):
+                used_addrs = [start_kwargs["bind_address"]]
+                configured = True
+            if not configured:
+                configured, used_addrs = _apply_sender_bind_addresses(self.sender, bind_addrs)
             if not configured:
                 if start_kwargs.get("bind_addresses"):
                     used_addrs = list(bind_addrs)
@@ -966,7 +1024,7 @@ class SenderThread(threading.Thread):
                     used_addrs = [start_kwargs["bind_address"]]
                 else:
                     used_addrs = bind_addrs[:1]
-                if len(bind_addrs) > 1 and len(used_addrs) == 1:
+                if len(bind_addrs) > 1 and len(used_addrs) <= 1:
                     log("sACN library does not support multiple bind addresses; using first selection")
         self._active_universes.clear()
         if bind_addrs:
