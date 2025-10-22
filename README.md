@@ -22,77 +22,118 @@ https://www.reddit.com/r/hotas/comments/v0ud87/to_use_the_thrustmaster_tflight_4
 
 ---
 
-## Requirements
+## Quick Start (Automated Install)
+
+Copy this to your terminal!
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Fly-My-Fixtures/Fly-My-Fixtures/main/install_followspot.sh | bash
+```
+
+The installer script:
+
+1. Updates `apt` and installs the required system packages (`python3`, `python3-venv`, `libsdl2-2.0-0`, GPIO helpers, and `git`).
+2. Clones this repository into `~/followspot` (or updates it if it already exists).
+3. Creates/updates a Python virtual environment at `~/followspot/.venv`.
+4. Installs the Python dependencies (`flask`, `pygame`, `sacn`).
+
+When it finishes you will see reminders for starting the app with:
+
+```bash
+source ~/followspot/.venv/bin/activate
+python main.py
+```
+
+### Customizing the one-liner
+
+You can override the defaults by setting environment variables before running the installer. Examples:
+
+```bash
+INSTALL_DIR=$HOME/followspot-staging \
+BRANCH=stable \
+curl -fsSL https://raw.githubusercontent.com/Fly-My-Fixtures/Fly-My-Fixtures/main/install_followspot.sh | bash
+```
+
+Available overrides:
+
+- `REPO_URL` – clone from a fork or mirror.
+- `BRANCH` – checkout a different branch/tag.
+- `INSTALL_DIR` – change where the project lives (default `~/followspot`).
+- `VENV_DIR` – customize the virtual environment path.
+
+---
+
+## Manual Setup (if you prefer to do it yourself)
 
 ### OS
 Ubuntu Server 20.04+ (or Raspberry Pi OS). Works headless.
 
 ### System Packages
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv \
-                    libsdl2-2.0-0 \
-                    python3-gpiozero python3-lgpio \
-                    git
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-venv \
+                        libsdl2-2.0-0 \
+                        python3-gpiozero python3-lgpio \
+                        git
+```
 
-    libsdl2-2.0-0 is required for pygame’s joystick API (works without X).
-    On non-Pi machines, the GPIO packages are harmless; the app degrades gracefully.
+- `libsdl2-2.0-0` is required for pygame’s joystick API (works without X).
+- On non-Pi machines, the GPIO packages are harmless; the app degrades gracefully.
 
-Python Packages (inside venv)
+### Python packages (inside the venv)
 
-    flask
+- `flask`
+- `pygame`
+- `sacn` (python-sACN)
 
-    pygame
+### Clone & Install
 
-    sacn (python-sACN)
-
-Clone & Install
-
+```bash
 mkdir -p ~/followspot && cd ~/followspot
-git clone https://github.com/<yourname>/<repo>.git .
+git clone https://github.com/Fly-My-Fixtures/Fly-My-Fixtures.git .
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install flask pygame sacn
+```
 
-First Run
+### First Run
 
+```bash
 source ~/followspot/.venv/bin/activate
-python followspot_server.py
+python main.py
+```
 
 Then open a browser to:
 
-    http://<server-ip>:80/ (default)
+- `http://<server-ip>:8080/` (default)
+- change the `APP.run` port in `main.py` if you prefer a different port.
 
-    or change to port 8080 if preferred
+### Configure
 
-Configure
+- Use the web UI to add fixtures, change mappings, and toggle multi-universe.
+- GPIO LEDs:
+  - `GPIO17` → Green LED → resistor → GND
+  - `GPIO27` → Red LED → resistor → GND
+  - Change pins in the UI if wired differently.
 
-    Use the web UI to add fixtures, change mappings, and toggle multi-universe.
+### Persistence
 
-    GPIO LEDs:
+- Writes `settings.json` and auto-creates `fixtures.csv`.
+- Auto-loads from CSV if JSON is missing or empty.
 
-        GPIO17 → Green LED → resistor → GND
-
-        GPIO27 → Red LED → resistor → GND
-
-        Change pins in UI if wired differently.
-
-Persistence
-
-    Writes settings.json and auto-creates fixtures.csv
-
-    Auto-loads from CSV if JSON is missing or empty
-
-Run on Boot (systemd)
+### Run on Boot (systemd)
 1️⃣ Change port if desired
 
-Edit the bottom of followspot_server.py:
+Edit the bottom of `main.py`:
 
+```python
 APP.run(host="0.0.0.0", port=8080, threaded=True)
+```
 
 2️⃣ Create the service
 
+```bash
 sudo tee /etc/systemd/system/followspot.service >/dev/null <<'EOF'
 [Unit]
 Description=FollowSpot Web + sACN
@@ -104,39 +145,50 @@ User=%i
 WorkingDirectory=/home/%i/followspot
 Environment=SDL_VIDEODRIVER=dummy
 Environment=SDL_AUDIODRIVER=dummy
-ExecStart=/home/%i/followspot/.venv/bin/python /home/%i/followspot/followspot_server.py
+ExecStart=/home/%i/followspot/.venv/bin/python /home/%i/followspot/main.py
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
 sudo sed -i "s/%i/$USER/g" /etc/systemd/system/followspot.service
+```
 
 3️⃣ Enable & start
 
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now followspot.service
 systemctl status followspot.service
+```
 
 4️⃣ Open firewall
 
+```bash
 sudo ufw allow 8080/tcp
+```
 
-Browse to http://<server-ip>:8080/.
-Port 80 (Optional)
+Browse to `http://<server-ip>:8080/`.
+
+### Port 80 (optional)
 
 To bind port 80 without root:
 
+```bash
 sudo setcap 'cap_net_bind_service=+ep' ~/followspot/.venv/bin/python
+```
 
-Then keep the port 80 line in followspot_server.py and restart the service.
-Updating
+Then keep the port 80 line in `main.py` and restart the service.
 
+### Updating
+
+```bash
 cd ~/followspot
 git pull
 source .venv/bin/activate
 pip install -U flask pygame sacn
 sudo systemctl restart followspot.service
+```
 
 Troubleshooting
 No joystick detected
@@ -158,11 +210,13 @@ No sACN output
     Test with a tool like sACNView on another device.
 
 Files
-File	Purpose
-followspot_server.py	Main program
-settings.json	Persistent settings (includes fixture list)
-fixtures.csv	Auto-generated backup / import-export list
-followspot.service	Systemd unit file
+
+| File | Purpose |
+| --- | --- |
+| `main.py` | Main program |
+| `settings.json` | Persistent settings (includes fixture list) |
+| `fixtures.csv` | Auto-generated backup / import-export list |
+| `followspot.service` | Example systemd unit file |
 License
 
 MIT
