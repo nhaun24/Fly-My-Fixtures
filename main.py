@@ -1993,13 +1993,26 @@ worker = SenderThread()
 
 # ---------------- Web UI ----------------
 
-UI_HTML_PATH = os.path.join(os.path.dirname(__file__), "ui_main.html")
+UI_DIR = os.path.dirname(__file__)
+UI_HTML_PATH = os.path.join(UI_DIR, "ui_main.html")
+UI_CSS_PATH = os.path.join(UI_DIR, "ui_main.css")
+UI_JS_PATH = os.path.join(UI_DIR, "ui_main.js")
 
 # ---------------- Routes ----------------
 
 @APP.route("/")
 def index():
     return send_file(UI_HTML_PATH)
+
+
+@APP.route("/ui_main.css")
+def ui_css():
+    return send_file(UI_CSS_PATH)
+
+
+@APP.route("/ui_main.js")
+def ui_js():
+    return send_file(UI_JS_PATH)
 
 @APP.route("/api/status")
 def api_status():
