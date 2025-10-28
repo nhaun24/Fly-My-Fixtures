@@ -624,6 +624,129 @@ details.section > .inner {
   -webkit-user-select: none;
 }
 
+/* Presets ----------------------------------------------------------------- */
+
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.preset-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.preset-current-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.preset-current-values strong {
+  color: var(--color-text-strong);
+}
+
+.preset-current-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.preset-current-actions input[type="text"] {
+  min-width: 200px;
+}
+
+.preset-current-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.status-line {
+  margin: -8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.status-line.success {
+  color: var(--color-success);
+}
+
+.status-line.error {
+  color: var(--color-error);
+}
+
+.preset-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.preset-table thead {
+  background: var(--color-surface-muted);
+}
+
+.preset-table th,
+.preset-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.preset-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.preset-table td strong {
+  font-weight: 600;
+}
+
+.preset-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.preset-button-input {
+  width: 100%;
+  max-width: 90px;
+}
+
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn.tiny {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.preset-empty {
+  padding: 16px;
+  background: var(--color-panel);
+  border: 1px dashed var(--color-border-muted);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
 /* Accessibility ----------------------------------------------------------- */
 
 .btn:focus-visible,

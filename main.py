@@ -1,4 +1,4 @@
-import os, json, time, threading, queue, csv, io, sys, subprocess, socket, re, tempfile
+import os, json, time, threading, queue, csv, io, sys, subprocess, socket, re, tempfile, uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, Response, send_file
 import pygame
@@ -81,6 +81,10 @@ DEFAULTS = {
     "default_universe": 1,             # used if MU disabled and as default for new fixtures
 
     "button_actions": [],  # e.g. [{"button":7,"type":"toggle_fixture","targets":["Left"]}]
+
+    # Position presets + button assignments
+    "position_presets": [],
+    "preset_button_map": [],
 
     # Fixtures list (editable in UI)
     "fixtures": [],
@@ -652,6 +656,11 @@ def load_settings():
         merged[k] = v
     merged["fixtures"] = clamp_fixtures(merged.get("fixtures", []))
     merged["sacn_bind_addresses"] = sanitize_bind_addresses(merged.get("sacn_bind_addresses", []))
+    merged["position_presets"] = sanitize_presets(merged.get("position_presets", []))
+    merged["preset_button_map"] = sanitize_preset_button_map(
+        merged.get("preset_button_map", []),
+        merged.get("position_presets", []),
+    )
     settings = merged
     maybe_load_fixtures_csv_into_settings()
     save_settings()
@@ -660,6 +669,11 @@ def save_settings():
     settings["fixtures"] = clamp_fixtures(settings.get("fixtures", []))
     settings["gpio_fixture_led_pins"] = normalize_fixture_led_pins(settings.get("gpio_fixture_led_pins", []))
     settings["sacn_bind_addresses"] = sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
+    settings["position_presets"] = sanitize_presets(settings.get("position_presets", []))
+    settings["preset_button_map"] = sanitize_preset_button_map(
+        settings.get("preset_button_map", []),
+        settings.get("position_presets", []),
+    )
     with open(SETTINGS_PATH, "w") as f:
         json.dump(settings, f, indent=2)
     write_fixtures_csv()
@@ -699,6 +713,132 @@ def clamp8(x):
         return max(0, min(255, int(x)))
     except Exception:
         return 0
+
+
+def sanitize_position_values(values):
+    sanitized = {}
+    if not isinstance(values, dict):
+        return sanitized
+    if "pan" in values and values["pan"] is not None:
+        try:
+            sanitized["pan"] = clamp16(values["pan"])
+        except Exception:
+            pass
+    if "tilt" in values and values["tilt"] is not None:
+        try:
+            sanitized["tilt"] = clamp16(values["tilt"])
+        except Exception:
+            pass
+    if "zoom" in values and values["zoom"] is not None:
+        try:
+            sanitized["zoom"] = clamp16(values["zoom"])
+        except Exception:
+            pass
+    if "dimmer" in values and values["dimmer"] is not None:
+        try:
+            sanitized["dimmer"] = clamp8(values["dimmer"])
+        except Exception:
+            pass
+    return sanitized
+
+
+def sanitize_presets(presets):
+    cleaned = []
+    seen_ids = set()
+    for entry in presets or []:
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get("id") or "").strip()
+        if not pid:
+            pid = f"preset-{uuid.uuid4().hex[:8]}"
+        base_pid = pid
+        counter = 1
+        while pid in seen_ids:
+            pid = f"{base_pid}-{counter}"
+            counter += 1
+        seen_ids.add(pid)
+
+        preset = {"id": pid, "name": str(entry.get("name") or pid)}
+
+        values = sanitize_position_values(entry)
+        preset.update(values)
+
+        created = entry.get("created") or entry.get("timestamp")
+        if created:
+            preset["created"] = str(created)
+        updated = entry.get("updated")
+        if updated:
+            preset["updated"] = str(updated)
+
+        cleaned.append(preset)
+    return cleaned
+
+
+def sanitize_preset_button_map(entries, presets=None):
+    presets = presets or []
+    valid_ids = {str(p.get("id")) for p in presets if p and p.get("id")}
+    button_to_preset = {}
+    preset_to_button = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            button = int(entry.get("button"))
+        except Exception:
+            continue
+        preset_id = str(entry.get("preset_id") or "").strip()
+        if not preset_id or preset_id not in valid_ids:
+            continue
+        if preset_id in preset_to_button:
+            prev_button = preset_to_button[preset_id]
+            button_to_preset.pop(prev_button, None)
+        button_to_preset[button] = preset_id
+        preset_to_button[preset_id] = button
+    cleaned = [
+        {"button": btn, "preset_id": pid}
+        for btn, pid in sorted(button_to_preset.items(), key=lambda item: item[0])
+    ]
+    return cleaned
+
+
+def get_preset_by_id(pid):
+    target = str(pid or "").strip()
+    if not target:
+        return None
+    for preset in settings.get("position_presets", []):
+        if str(preset.get("id")) == target:
+            return preset
+    return None
+
+
+def get_current_position_state():
+    snapshot = {}
+    if worker:
+        try:
+            snapshot = worker.snapshot()
+        except Exception:
+            snapshot = {}
+    if not status.get("active"):
+        try:
+            captured = capture_initial_fixture_state()
+        except Exception:
+            captured = {}
+        for key, value in (captured or {}).items():
+            if key not in snapshot and value is not None:
+                snapshot[key] = value
+    return sanitize_position_values(snapshot)
+
+
+def recall_position_preset(preset_id):
+    preset = get_preset_by_id(preset_id)
+    if not preset:
+        return False
+    if worker and worker.apply_preset(preset):
+        name = preset.get("name") or preset.get("id") or str(preset_id)
+        log(f"Preset recalled: {name}")
+        return True
+    return False
+
 
 def to16(v):
     v = clamp16(v)
@@ -1807,6 +1947,42 @@ class SenderThread(threading.Thread):
                 now = time.time()
                 # ---- Button actions (rising/falling edges) ----
                 actions = settings.get("button_actions", []) or []
+                preset_assignments = {}
+                for mapping in settings.get("preset_button_map", []) or []:
+                    try:
+                        m_button = int(mapping.get("button", -1))
+                    except Exception:
+                        m_button = -1
+                    preset_id = str(mapping.get("preset_id", "")).strip()
+                    if m_button < 0 or not preset_id:
+                        continue
+                    preset_assignments[m_button] = preset_id
+
+                tracked_indices = set()
+                for act in actions:
+                    try:
+                        idx = int(act.get("button", -1))
+                    except Exception:
+                        idx = -1
+                    if idx >= 0:
+                        tracked_indices.add(idx)
+                for idx in preset_assignments.keys():
+                    if idx >= 0:
+                        tracked_indices.add(idx)
+
+                tracked_states = {}
+
+                def get_button_state(button_index):
+                    if button_index not in tracked_states:
+                        cur_val = 1 if self.btn(button_index) else 0
+                        prev_val = self._btn_prev.get(button_index, 0)
+                        self._btn_prev[button_index] = cur_val
+                        tracked_states[button_index] = (cur_val, prev_val)
+                    return tracked_states[button_index]
+
+                for idx in tracked_indices:
+                    get_button_state(idx)
+
                 for act in actions:
                     try:
                         bidx = int(act.get("button", -1))
@@ -1815,9 +1991,7 @@ class SenderThread(threading.Thread):
                     if bidx < 0:
                         continue
 
-                    cur = 1 if self.btn(bidx) else 0
-                    prev = self._btn_prev.get(bidx, 0)
-                    self._btn_prev[bidx] = cur
+                    cur, prev = get_button_state(bidx)
 
                     mode = str(act.get("mode", "toggle")).lower()  # 'toggle' or 'hold'
                     atype = str(act.get("type", "")).lower()       # 'toggle_fixture','enable_fixture','disable_fixture','toggle_group'
@@ -1853,6 +2027,11 @@ class SenderThread(threading.Thread):
                         if atype in ("toggle_fixture", "enable_fixture", "toggle_group"):
                             for fid in targets:
                                 set_fixture_enabled_by_id(fid, False)
+
+                for bidx, preset_id in preset_assignments.items():
+                    cur, prev = get_button_state(bidx)
+                    if cur == 1 and prev == 0:
+                        recall_position_preset(preset_id)
 
                 if self.btn(settings["btn_activate"]) and now-last_activate>0.15 and not status["active"]:
                     with state_lock:
@@ -1988,6 +2167,53 @@ class SenderThread(threading.Thread):
 
     def stop(self):
         self._stop.set()
+
+    def snapshot(self):
+        return {
+            "pan": clamp16(self.pan_pos),
+            "tilt": clamp16(self.tilt_pos),
+            "dimmer": clamp8(self.dimmer),
+            "zoom": clamp16(self.zoom_val),
+        }
+
+    def apply_preset(self, preset):
+        if not isinstance(preset, dict):
+            return False
+        values = sanitize_position_values(preset)
+        if not values:
+            return False
+
+        changed = False
+        if "pan" in values:
+            self.pan_pos = clamp16(values["pan"])
+            changed = True
+        if "tilt" in values:
+            self.tilt_pos = clamp16(values["tilt"])
+            changed = True
+        if "dimmer" in values:
+            self.dimmer = clamp8(values["dimmer"])
+            changed = True
+        if "zoom" in values:
+            self.zoom_val = clamp16(values["zoom"])
+            changed = True
+        if not changed:
+            return False
+
+        if status.get("active") and self.sender:
+            new_universes = send_frames_for_fixtures(
+                self.sender,
+                self.pan_pos,
+                self.tilt_pos,
+                self.dimmer,
+                self.zoom_val,
+                self.mirror_senders,
+            )
+            if new_universes is not None:
+                self._active_universes = set(new_universes)
+                self._last_stream_universes.update(new_universes)
+                self._has_streamed = self._has_streamed or bool(new_universes)
+                status["last_frame_ts"] = time.time()
+        return True
 
 worker = SenderThread()
 
@@ -2138,6 +2364,206 @@ def api_settings():
         save_settings()
     log("Settings saved")
     return jsonify({"ok": True, "message": "Settings saved"})
+
+
+@APP.route("/api/presets", methods=["GET", "POST"])
+def api_presets():
+    if request.method == "GET":
+        presets = sanitize_presets(settings.get("position_presets", []))
+        buttons = sanitize_preset_button_map(settings.get("preset_button_map", []), presets)
+        return jsonify({
+            "presets": presets,
+            "buttons": buttons,
+            "current": get_current_position_state(),
+        })
+
+    payload = request.get_json(force=True, silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        name = f"Preset {len(settings.get('position_presets', [])) + 1}"
+
+    values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+    use_current = payload.get("use_current", True)
+
+    position_values = {}
+    if use_current:
+        position_values.update(get_current_position_state())
+    position_values.update(sanitize_position_values(values))
+    position_values = sanitize_position_values(position_values)
+    if not position_values:
+        return jsonify({"error": "No position data available"}), 400
+
+    preset_id = f"preset-{uuid.uuid4().hex[:8]}"
+    now = datetime.utcnow().isoformat() + "Z"
+    new_preset = {"id": preset_id, "name": name, "created": now, "updated": now}
+    new_preset.update(position_values)
+
+    with state_lock:
+        presets = list(settings.get("position_presets", []))
+        presets.append(new_preset)
+        settings["position_presets"] = sanitize_presets(presets)
+        save_settings()
+        stored = get_preset_by_id(preset_id) or new_preset
+
+    log(f"Preset created: {stored.get('name')} ({stored.get('id')})")
+    return jsonify({
+        "ok": True,
+        "preset": stored,
+    })
+
+
+@APP.route("/api/presets/<pid>", methods=["PATCH", "PUT"])
+def api_preset_update(pid):
+    payload = request.get_json(force=True, silent=True) or {}
+    values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+    use_current = bool(payload.get("use_current", False))
+    updates = sanitize_position_values(values)
+    if use_current:
+        current = get_current_position_state()
+        current.update(updates)
+        updates = sanitize_position_values(current)
+
+    new_name = payload.get("name")
+    target_id = str(pid or "").strip()
+    if not target_id:
+        return jsonify({"error": "Preset id required"}), 400
+
+    changed = False
+    updated = None
+
+    with state_lock:
+        presets = list(settings.get("position_presets", []))
+        for idx, preset in enumerate(presets):
+            if str(preset.get("id")) != target_id:
+                continue
+            new_preset = preset.copy()
+            if new_name is not None:
+                new_name_str = str(new_name).strip()
+                if new_name_str and new_name_str != new_preset.get("name"):
+                    new_preset["name"] = new_name_str
+                    changed = True
+            if updates:
+                for key, value in updates.items():
+                    if new_preset.get(key) != value:
+                        new_preset[key] = value
+                        changed = True
+            if changed:
+                timestamp = datetime.utcnow().isoformat() + "Z"
+                if "created" not in new_preset:
+                    new_preset["created"] = timestamp
+                new_preset["updated"] = timestamp
+                presets[idx] = new_preset
+                settings["position_presets"] = sanitize_presets(presets)
+                save_settings()
+                updated = get_preset_by_id(target_id)
+            else:
+                updated = new_preset
+            break
+
+    if updated is None:
+        return jsonify({"error": "Preset not found"}), 404
+
+    if changed:
+        log(f"Preset updated: {updated.get('name')} ({updated.get('id')})")
+
+    return jsonify({"ok": True, "preset": updated, "changed": bool(changed)})
+
+
+@APP.route("/api/presets/<pid>", methods=["DELETE"])
+def api_preset_delete(pid):
+    target_id = str(pid or "").strip()
+    if not target_id:
+        return jsonify({"error": "Preset id required"}), 400
+
+    removed = None
+    with state_lock:
+        presets = list(settings.get("position_presets", []))
+        new_presets = []
+        for preset in presets:
+            if str(preset.get("id")) == target_id:
+                removed = preset
+                continue
+            new_presets.append(preset)
+        if removed is None:
+            return jsonify({"error": "Preset not found"}), 404
+        settings["position_presets"] = sanitize_presets(new_presets)
+        button_map = [entry for entry in settings.get("preset_button_map", []) if str(entry.get("preset_id")) != target_id]
+        settings["preset_button_map"] = sanitize_preset_button_map(button_map, settings["position_presets"])
+        save_settings()
+
+    name = removed.get("name") or removed.get("id") or target_id
+    log(f"Preset removed: {name}")
+    return jsonify({
+        "ok": True,
+        "presets": settings.get("position_presets", []),
+        "buttons": settings.get("preset_button_map", []),
+    })
+
+
+@APP.route("/api/presets/<pid>/recall", methods=["POST"])
+def api_preset_recall(pid):
+    preset = get_preset_by_id(pid)
+    if not preset:
+        return jsonify({"error": "Preset not found"}), 404
+    if not worker or not worker.apply_preset(preset):
+        return jsonify({"error": "Preset has no position data or cannot be applied"}), 400
+    name = preset.get("name") or preset.get("id") or str(pid)
+    log(f"Preset recalled via API: {name}")
+    return jsonify({"ok": True})
+
+
+@APP.route("/api/preset-buttons", methods=["POST"])
+def api_preset_buttons():
+    payload = request.get_json(force=True, silent=True) or {}
+    assignments = payload.get("assignments")
+
+    if isinstance(assignments, list):
+        entries = []
+        for item in assignments:
+            if not isinstance(item, dict):
+                continue
+            entries.append({
+                "button": item.get("button"),
+                "preset_id": item.get("preset_id"),
+            })
+        with state_lock:
+            settings["preset_button_map"] = sanitize_preset_button_map(entries, settings.get("position_presets", []))
+            save_settings()
+        return jsonify({"ok": True, "buttons": settings.get("preset_button_map", [])})
+
+    try:
+        button = int(payload.get("button"))
+    except Exception:
+        return jsonify({"error": "Valid button index required"}), 400
+
+    preset_id = str(payload.get("preset_id") or "").strip()
+    if preset_id and not get_preset_by_id(preset_id):
+        return jsonify({"error": "Preset not found"}), 404
+
+    with state_lock:
+        entries = []
+        for entry in settings.get("preset_button_map", []):
+            try:
+                entry_button = int(entry.get("button", -1))
+            except Exception:
+                continue
+            entry_pid = str(entry.get("preset_id") or "").strip()
+            if entry_button == button:
+                continue
+            if preset_id and entry_pid == preset_id:
+                continue
+            entries.append({"button": entry_button, "preset_id": entry_pid})
+        if preset_id:
+            entries.append({"button": button, "preset_id": preset_id})
+        settings["preset_button_map"] = sanitize_preset_button_map(entries, settings.get("position_presets", []))
+        save_settings()
+
+    if preset_id:
+        log(f"Preset button assigned: button {button} → {preset_id}")
+    else:
+        log(f"Preset button cleared: button {button}")
+
+    return jsonify({"ok": True, "buttons": settings.get("preset_button_map", [])})
 
 @APP.route("/api/fixtures", methods=["GET"])
 def api_fixtures_list():

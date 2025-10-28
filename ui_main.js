@@ -16,6 +16,10 @@
   let BTN_FINE = 0;
   let BTN_ZOOM = 0;
 
+  let POSITION_PRESETS = [];
+  let PRESET_BUTTONS = [];
+  let PRESET_STATUS_TIMER = null;
+
   /* ------------------------------------------------------------------------ */
   /* Utility helpers                                                         */
   /* ------------------------------------------------------------------------ */
@@ -78,6 +82,32 @@
 
   function isCheckbox(el) {
     return !!el && el.type === 'checkbox';
+  }
+
+  function formatPresetValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '—';
+    return Math.round(num).toString();
+  }
+
+  function setPresetStatus(message, type = 'info') {
+    const el = document.getElementById('preset-status');
+    if (!el) return;
+    const normalized = type === 'success' || type === 'error' ? type : 'info';
+    el.textContent = message || '';
+    el.className = `status-line ${normalized}`;
+    if (PRESET_STATUS_TIMER) {
+      clearTimeout(PRESET_STATUS_TIMER);
+      PRESET_STATUS_TIMER = null;
+    }
+    if (message) {
+      PRESET_STATUS_TIMER = setTimeout(() => {
+        const target = document.getElementById('preset-status');
+        if (!target) return;
+        target.textContent = '';
+        target.className = 'status-line info';
+      }, 4000);
+    }
   }
 
   /* ------------------------------------------------------------------------ */
@@ -233,6 +263,303 @@
   async function refreshNetworkAdapters(selected) {
     await ensureNetworkAdapters();
     renderNetworkAdapters(selected);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Presets                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  function getPresetById(id) {
+    return POSITION_PRESETS.find((preset) => String(preset.id) === String(id));
+  }
+
+  function getButtonForPreset(id) {
+    return PRESET_BUTTONS.find((entry) => String(entry.preset_id) === String(id));
+  }
+
+  function updatePresetCurrent(current) {
+    const panEl = document.getElementById('preset-cur-pan');
+    const tiltEl = document.getElementById('preset-cur-tilt');
+    const dimEl = document.getElementById('preset-cur-dimmer');
+    const zoomEl = document.getElementById('preset-cur-zoom');
+    const source = current || {};
+    if (panEl) panEl.textContent = formatPresetValue(source.pan);
+    if (tiltEl) tiltEl.textContent = formatPresetValue(source.tilt);
+    if (dimEl) dimEl.textContent = formatPresetValue(source.dimmer);
+    if (zoomEl) zoomEl.textContent = formatPresetValue(source.zoom);
+  }
+
+  function renderPresetList() {
+    const container = document.getElementById('preset-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!Array.isArray(POSITION_PRESETS) || !POSITION_PRESETS.length) {
+      const empty = document.createElement('div');
+      empty.className = 'preset-empty';
+      empty.textContent = 'No presets saved yet. Capture the current position to create one.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'preset-table';
+
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+      <tr>
+        <th>Name</th>
+        <th>Pan (16-bit)</th>
+        <th>Tilt (16-bit)</th>
+        <th>Dimmer (8-bit)</th>
+        <th>Zoom</th>
+        <th>Button</th>
+        <th>Actions</th>
+      </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    POSITION_PRESETS.forEach((preset) => {
+      const row = document.createElement('tr');
+      row.dataset.id = preset.id;
+
+      const nameCell = document.createElement('td');
+      const nameWrap = document.createElement('div');
+      nameWrap.className = 'preset-name';
+      const nameStrong = document.createElement('strong');
+      nameStrong.textContent = preset.name || preset.id;
+      nameWrap.appendChild(nameStrong);
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.className = 'btn tiny';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => renamePreset(preset.id));
+      nameWrap.appendChild(renameBtn);
+      nameCell.appendChild(nameWrap);
+      row.appendChild(nameCell);
+
+      const panCell = document.createElement('td');
+      panCell.textContent = formatPresetValue(preset.pan);
+      row.appendChild(panCell);
+
+      const tiltCell = document.createElement('td');
+      tiltCell.textContent = formatPresetValue(preset.tilt);
+      row.appendChild(tiltCell);
+
+      const dimCell = document.createElement('td');
+      dimCell.textContent = formatPresetValue(preset.dimmer);
+      row.appendChild(dimCell);
+
+      const zoomCell = document.createElement('td');
+      zoomCell.textContent = formatPresetValue(preset.zoom);
+      row.appendChild(zoomCell);
+
+      const buttonCell = document.createElement('td');
+      const buttonEntry = getButtonForPreset(preset.id);
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'preset-button-input';
+      input.min = '0';
+      input.step = '1';
+      input.placeholder = 'None';
+      if (buttonEntry && Number.isFinite(Number(buttonEntry.button))) {
+        input.value = buttonEntry.button;
+      }
+      input.addEventListener('change', () => assignPresetButton(preset.id, input.value));
+      buttonCell.appendChild(input);
+      row.appendChild(buttonCell);
+
+      const actionsCell = document.createElement('td');
+      const actionsWrap = document.createElement('div');
+      actionsWrap.className = 'preset-actions';
+
+      const recallBtn = document.createElement('button');
+      recallBtn.type = 'button';
+      recallBtn.className = 'btn tiny';
+      recallBtn.textContent = 'Recall';
+      recallBtn.addEventListener('click', () => recallPreset(preset.id));
+      actionsWrap.appendChild(recallBtn);
+
+      const updateBtn = document.createElement('button');
+      updateBtn.type = 'button';
+      updateBtn.className = 'btn tiny';
+      updateBtn.textContent = 'Update from Current';
+      updateBtn.addEventListener('click', () => updatePresetFromCurrent(preset.id));
+      actionsWrap.appendChild(updateBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn danger tiny';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => deletePreset(preset.id));
+      actionsWrap.appendChild(deleteBtn);
+
+      actionsCell.appendChild(actionsWrap);
+      row.appendChild(actionsCell);
+
+      tbody.appendChild(row);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  async function loadPresets(showStatus = false) {
+    try {
+      const data = await fetchJSON('/api/presets');
+      POSITION_PRESETS = Array.isArray(data.presets) ? data.presets : [];
+      PRESET_BUTTONS = Array.isArray(data.buttons) ? data.buttons : [];
+      updatePresetCurrent(data.current || {});
+      renderPresetList();
+      if (showStatus) {
+        setPresetStatus('Preset data refreshed', 'info');
+      }
+    } catch (error) {
+      console.error('Failed to load presets', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function refreshPresetState() {
+    await loadPresets(true);
+  }
+
+  async function savePresetFromCurrent() {
+    const nameInput = document.getElementById('preset-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    try {
+      await fetchJSON('/api/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (nameInput) nameInput.value = '';
+      setPresetStatus('Preset saved', 'success');
+      await loadPresets();
+    } catch (error) {
+      console.error('Failed to save preset', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function recallPreset(presetId) {
+    try {
+      await fetchJSON(`/api/presets/${encodeURIComponent(presetId)}/recall`, {
+        method: 'POST'
+      });
+      setPresetStatus('Preset recalled', 'success');
+    } catch (error) {
+      console.error('Failed to recall preset', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function updatePresetFromCurrent(presetId) {
+    try {
+      await fetchJSON(`/api/presets/${encodeURIComponent(presetId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_current: true })
+      });
+      setPresetStatus('Preset updated from current values', 'success');
+      await loadPresets();
+    } catch (error) {
+      console.error('Failed to update preset', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function deletePreset(presetId) {
+    const preset = getPresetById(presetId);
+    const label = preset && preset.name ? preset.name : 'this preset';
+    if (!window.confirm(`Delete ${label}?`)) return;
+    try {
+      await fetchJSON(`/api/presets/${encodeURIComponent(presetId)}`, {
+        method: 'DELETE'
+      });
+      setPresetStatus('Preset deleted', 'success');
+      await loadPresets();
+    } catch (error) {
+      console.error('Failed to delete preset', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function renamePreset(presetId) {
+    const preset = getPresetById(presetId);
+    const currentName = preset && preset.name ? preset.name : '';
+    const newName = window.prompt('Enter a new name for this preset:', currentName);
+    if (newName === null) return;
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setPresetStatus('Preset name cannot be empty', 'error');
+      return;
+    }
+    if (trimmed === currentName) {
+      return;
+    }
+    try {
+      await fetchJSON(`/api/presets/${encodeURIComponent(presetId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      });
+      setPresetStatus('Preset renamed', 'success');
+      await loadPresets();
+    } catch (error) {
+      console.error('Failed to rename preset', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+    }
+  }
+
+  async function assignPresetButton(presetId, value) {
+    const existing = getButtonForPreset(presetId);
+    const trimmed = String(value ?? '').trim();
+
+    if (trimmed === '') {
+      if (!existing) {
+        return;
+      }
+      try {
+        await fetchJSON('/api/preset-buttons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ button: existing.button, preset_id: '' })
+        });
+        setPresetStatus('Preset button cleared', 'success');
+        await loadPresets();
+      } catch (error) {
+        console.error('Failed to clear preset button', error);
+        setPresetStatus(parseErrorMessage(error), 'error');
+        await loadPresets();
+      }
+      return;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed)) {
+      setPresetStatus('Button must be an integer', 'error');
+      await loadPresets();
+      return;
+    }
+    if (existing && Number(existing.button) === parsed) {
+      return;
+    }
+
+    try {
+      await fetchJSON('/api/preset-buttons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ button: parsed, preset_id: presetId })
+      });
+      setPresetStatus(`Assigned button ${parsed}`, 'success');
+      await loadPresets();
+    } catch (error) {
+      console.error('Failed to assign preset button', error);
+      setPresetStatus(parseErrorMessage(error), 'error');
+      await loadPresets();
+    }
   }
 
   function showCaptureError(message) {
@@ -1100,6 +1427,7 @@
 
     await loadSettings();
     await loadFixtures();
+    await loadPresets();
 
     refreshStatus();
     setInterval(refreshStatus, 1000);
@@ -1131,6 +1459,13 @@
     toggleMU,
     startPacketCapture,
     stopPacketCapture,
+    savePresetFromCurrent,
+    refreshPresetState,
+    recallPreset,
+    updatePresetFromCurrent,
+    renamePreset,
+    deletePreset,
+    assignPresetButton,
     vjoyEnable,
     vjoyThrottle,
     vjoyZoom,
