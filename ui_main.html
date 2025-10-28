@@ -116,6 +116,31 @@
         </div>
       </div>
 
+      <div class="card wide preset-card">
+        <h3>Position Presets</h3>
+        <p class="small muted">Capture the current pan, tilt, dimmer, and zoom values, then recall them from the web UI or a configured joystick button.</p>
+
+        <div class="preset-current">
+          <div class="preset-current-values">
+            <span>Pan: <strong id="preset-cur-pan">-</strong></span>
+            <span>Tilt: <strong id="preset-cur-tilt">-</strong></span>
+            <span>Dimmer: <strong id="preset-cur-dimmer">-</strong></span>
+            <span>Zoom: <strong id="preset-cur-zoom">-</strong></span>
+          </div>
+          <div class="preset-current-actions">
+            <input type="text" id="preset-name-input" placeholder="Preset name">
+            <div class="preset-current-buttons">
+              <button class="btn" type="button" onclick="savePresetFromCurrent()">Save Preset</button>
+              <button class="btn" type="button" onclick="refreshPresetState()">Refresh Values</button>
+            </div>
+          </div>
+        </div>
+
+        <p id="preset-status" class="status-line info"></p>
+
+        <div id="preset-list"></div>
+      </div>
+
       <div class="card wide">
         <h3>Packet Capture</h3>
         <label for="pcap-interface">Interface</label>

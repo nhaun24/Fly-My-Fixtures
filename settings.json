@@ -94,5 +94,7 @@
   "zoom_invert": false,
   "zoom_deadband": 0.05,
   "zoom_expo": 0.4,
-  "zoom_speed": 300
+  "zoom_speed": 300,
+  "position_presets": [],
+  "preset_button_map": []
 }
