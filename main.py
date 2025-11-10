@@ -20,7 +20,7 @@ DEFAULTS = {
     # legacy single-universe defaults (still used as defaults)
     "universe": 1,
     "priority": 150,
-    "per_address_priority_enabled": True,
+    # "per_address_priority_enabled": True,
     "fps": 60,
     "sacn_bind_addresses": [],
 
@@ -1342,28 +1342,32 @@ def capture_initial_fixture_state():
 
 def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=None):
     frames = {}  # uni -> [512]
-    pap_enabled = settings.get("per_address_priority_enabled", True)
-    per_address_priority = {} if pap_enabled else None  # uni -> [512]
+    # pap_enabled = settings.get("per_address_priority_enabled", True)
+    # per_address_priority = {} if pap_enabled else None  # uni -> [512]
+    pap_enabled = False  # Temporarily disable per-address priority for troubleshooting.
+    per_address_priority = None
     use_multi = settings.get("multi_universe_enabled", False)
     default_uni = settings.get("default_universe", settings.get("universe", 1))
     priority = _coerce_priority(settings.get("priority"), DEFAULTS.get("priority", 150))
-    frame_priority = DEFAULT_PER_CHANNEL_FLOOR if pap_enabled else priority
+    # frame_priority = DEFAULT_PER_CHANNEL_FLOOR if pap_enabled else priority
+    frame_priority = priority
 
     def get_frame(uni):
         if uni not in frames:
             frames[uni] = _blank_frame()
             _ensure_output(sender, uni, frame_priority, mirrors)
-        if pap_enabled and uni not in per_address_priority:
-            per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
+        # if pap_enabled and uni not in per_address_priority:
+        #     per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
         return frames[uni]
 
     def mark_priority(uni, ch):
-        if not pap_enabled:
-            return
-        if ch and 1 <= ch <= 512:
-            if uni not in per_address_priority:
-                per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
-            per_address_priority[uni][ch - 1] = priority
+        # if not pap_enabled:
+        #     return
+        # if ch and 1 <= ch <= 512:
+        #     if uni not in per_address_priority:
+        #         per_address_priority[uni] = [DEFAULT_PER_CHANNEL_FLOOR] * 512
+        #     per_address_priority[uni][ch - 1] = priority
+        return
 
     fixtures = settings.get("fixtures", [])
     if not fixtures:
@@ -1479,21 +1483,21 @@ def send_frames_for_fixtures(sender, pan16, tilt16, dimmer8, zoom_val, mirrors=N
     # push per-universe + debug
     for uni, data in frames.items():
         _ensure_output(sender, uni, frame_priority, mirrors)
-        if pap_enabled:
-            pap = per_address_priority.get(uni)
-            if pap is None:
-                pap = [DEFAULT_PER_CHANNEL_FLOOR] * 512
-            for s in targets:
-                try:
-                    s[uni].per_channel_priority = pap
-                except Exception:
-                    pass
-        else:
-            for s in targets:
-                try:
-                    s[uni].per_channel_priority = None
-                except Exception:
-                    pass
+        # if pap_enabled:
+        #     pap = per_address_priority.get(uni)
+        #     if pap is None:
+        #         pap = [DEFAULT_PER_CHANNEL_FLOOR] * 512
+        #     for s in targets:
+        #         try:
+        #             s[uni].per_channel_priority = pap
+        #         except Exception:
+        #             pass
+        # else:
+        #     for s in targets:
+        #         try:
+        #             s[uni].per_channel_priority = None
+        #         except Exception:
+        #             pass
         for s in targets:
             try:
                 s[uni].dmx_data = data
@@ -1723,23 +1727,23 @@ class SenderThread(threading.Thread):
                             targets = set()
                         else:
                             targets = set(self._active_universes) or set(self._last_stream_universes)
-                        pap_enabled = settings.get("per_address_priority_enabled", True)
+                        # pap_enabled = settings.get("per_address_priority_enabled", True)
                         all_senders = [s for s in [self.sender] + list(self.mirror_senders) if s]
                         for uni in targets:
                             _ensure_output(self.sender, uni, DEFAULT_PER_CHANNEL_FLOOR, self.mirror_senders)
                             for sender in all_senders:
                                 if not sender:
                                     continue
-                                if pap_enabled:
-                                    try:
-                                        sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
-                                    except Exception:
-                                        pass
-                                else:
-                                    try:
-                                        sender[uni].per_channel_priority = None
-                                    except Exception:
-                                        pass
+                                # if pap_enabled:
+                                #     try:
+                                #         sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
+                                #     except Exception:
+                                #         pass
+                                # else:
+                                #     try:
+                                #         sender[uni].per_channel_priority = None
+                                #     except Exception:
+                                #         pass
                                 try:
                                     sender[uni].dmx_data = [0]*512
                                 except Exception:
@@ -2122,22 +2126,22 @@ class SenderThread(threading.Thread):
                     if new_universes:
                         self._has_streamed = True
                         self._last_stream_universes.update(new_universes)
-                    pap_enabled = settings.get("per_address_priority_enabled", True)
+                    # pap_enabled = settings.get("per_address_priority_enabled", True)
                     for uni in prev_universes - new_universes:
                         try:
                             _ensure_output(self.sender, uni, DEFAULT_PER_CHANNEL_FLOOR, self.mirror_senders)
                             targets = [s for s in [self.sender] + list(self.mirror_senders) if s]
                             for sender in targets:
-                                if pap_enabled:
-                                    try:
-                                        sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
-                                    except Exception:
-                                        pass
-                                else:
-                                    try:
-                                        sender[uni].per_channel_priority = None
-                                    except Exception:
-                                        pass
+                                # if pap_enabled:
+                                #     try:
+                                #         sender[uni].per_channel_priority = [DEFAULT_PER_CHANNEL_FLOOR]*512
+                                #     except Exception:
+                                #         pass
+                                # else:
+                                #     try:
+                                #         sender[uni].per_channel_priority = None
+                                #     except Exception:
+                                #         pass
                                 try:
                                     sender[uni].dmx_data = [0]*512
                                 except Exception:
