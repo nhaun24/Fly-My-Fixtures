@@ -90,7 +90,7 @@ DEFAULTS = {
     "fixtures": [],
 
     # ---- Virtual joystick toggle/behavior ----
-    "virtual_joystick_enabled": True,
+    "virtual_joystick_enabled": False,
     "virtual_throttle_invert": True,   # client/UI uses this to flip slider mapping
 
     # --- Debug: log sACN output frames (throttled) ---

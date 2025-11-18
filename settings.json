@@ -82,7 +82,7 @@
       "invert_tilt": false
     }
   ],
-  "virtual_joystick_enabled": true,
+  "virtual_joystick_enabled": false,
   "virtual_throttle_invert": true,
   "debug_log_sacn": false,
   "debug_controller_buttons": false,
