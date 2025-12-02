@@ -5,6 +5,7 @@
   const FIXTURE_LIMIT = 6;
 
   let NETWORK_ADAPTERS = null;
+  let USB_DEVICES = [];
   let CAPTURE_STATE = null;
   let CAPTURE_POLL_TIMER = null;
   let restartConfirmTimer = null;
@@ -263,6 +264,66 @@
   async function refreshNetworkAdapters(selected) {
     await ensureNetworkAdapters();
     renderNetworkAdapters(selected);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* USB devices                                                              */
+  /* ------------------------------------------------------------------------ */
+
+  async function refreshUsbDevices(preferred) {
+    const select = document.getElementById('usb_device');
+    const emptyMsg = document.getElementById('usb-device-empty');
+    const refreshBtn = document.getElementById('usb-refresh-btn');
+
+    if (!select) return;
+
+    if (refreshBtn) refreshBtn.disabled = true;
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading…</option>';
+
+    let selected = typeof preferred === 'string' ? preferred : '';
+
+    try {
+      const resp = await fetchJSON('/api/usb/devices');
+      USB_DEVICES = Array.isArray(resp.devices) ? resp.devices : [];
+      if (!selected && resp.selected) {
+        selected = String(resp.selected);
+      }
+    } catch (error) {
+      console.error('Failed to load USB devices', error);
+      USB_DEVICES = [];
+    }
+
+    select.innerHTML = '';
+
+    const autoOption = document.createElement('option');
+    autoOption.value = '';
+    autoOption.textContent = 'Auto-select first device';
+    select.appendChild(autoOption);
+
+    const seen = new Set();
+    USB_DEVICES.forEach((device, index) => {
+      const id = device && device.id ? String(device.id) : `device-${index}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = device.label || device.name || id;
+      select.appendChild(opt);
+    });
+
+    if (emptyMsg) {
+      emptyMsg.style.display = USB_DEVICES.length ? 'none' : 'block';
+    }
+
+    if (selected && seen.has(selected)) {
+      select.value = selected;
+    } else {
+      select.value = '';
+    }
+
+    select.disabled = false;
+    if (refreshBtn) refreshBtn.disabled = false;
   }
 
   /* ------------------------------------------------------------------------ */
@@ -806,6 +867,8 @@
     const data = await fetchJSON('/api/settings');
     const form = document.getElementById('settings-form');
     if (!form) return;
+
+    await refreshUsbDevices(typeof data.usb_device === 'string' ? data.usb_device : '');
 
     Object.keys(data).forEach((key) => {
       const el = form[key];
@@ -1466,6 +1529,7 @@
     renamePreset,
     deletePreset,
     assignPresetButton,
+    refreshUsbDevices,
     vjoyEnable,
     vjoyThrottle,
     vjoyZoom,

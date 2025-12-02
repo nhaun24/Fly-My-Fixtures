@@ -49,6 +49,9 @@ DEFAULTS = {
     "invert_tilt": False,
     "throttle_invert": False,
 
+    # Preferred USB device (joystick/controller)
+    "usb_device": "",
+
     # DMX patch (legacy single-fixture fields; still editable, but superseded by fixtures[])
     "ch_pan_coarse": 1,
     "ch_pan_fine": 2,
@@ -314,6 +317,51 @@ def list_network_interfaces():
 
     adapters.sort(key=lambda item: (item["is_loopback"], item["name"], item["address"]))
     return adapters
+
+
+def _joystick_identifier(name: str, guid: str, index: int) -> str:
+    name = str(name or "").strip()
+    guid = str(guid or "").strip()
+    if guid:
+        return guid
+    if name:
+        return f"{name}:{index}"
+    return f"index:{index}"
+
+
+def list_usb_devices():
+    devices = []
+    try:
+        pygame.joystick.init()
+        count = pygame.joystick.get_count()
+    except Exception:
+        count = 0
+
+    for idx in range(count):
+        try:
+            js = pygame.joystick.Joystick(idx)
+            js.init()
+            name = js.get_name() or f"Joystick {idx+1}"
+            try:
+                guid = js.get_guid()
+            except Exception:
+                guid = ""
+            identifier = _joystick_identifier(name, guid, idx)
+            label = name
+            if guid:
+                label = f"{name} ({guid})"
+            elif count > 1:
+                label = f"{name} (#{idx+1})"
+            devices.append({
+                "id": str(identifier),
+                "name": str(name),
+                "guid": str(guid or ""),
+                "index": idx,
+                "label": label,
+            })
+        except Exception:
+            continue
+    return devices
 
 def get_sacn_bind_addresses():
     return sanitize_bind_addresses(settings.get("sacn_bind_addresses", []))
@@ -1574,6 +1622,7 @@ class SenderThread(threading.Thread):
         self.sender = None
         self.mirror_senders = []
         self.js = None
+        self._js_identifier = ""
 
         self.pan_pos = 0
         self.tilt_pos = 0
@@ -1768,10 +1817,53 @@ class SenderThread(threading.Thread):
 
     def init_joystick(self):
         pygame.joystick.quit(); pygame.joystick.init()
-        if pygame.joystick.get_count() == 0:
+        try:
+            count = pygame.joystick.get_count()
+        except Exception:
+            count = 0
+
+        if count == 0:
+            self._js_identifier = ""
             return None
-        j = pygame.joystick.Joystick(0); j.init()
-        return j
+
+        target = str(settings.get("usb_device") or "").strip().lower()
+        chosen = None
+        chosen_index = 0
+        if target:
+            for idx in range(count):
+                try:
+                    js = pygame.joystick.Joystick(idx)
+                    js.init()
+                    name = (js.get_name() or "").strip()
+                    try:
+                        guid = str(js.get_guid())
+                    except Exception:
+                        guid = ""
+                    identifier = _joystick_identifier(name, guid, idx)
+                    candidates = [identifier, guid, name, f"index:{idx}"]
+                    normalized = [c.strip().lower() for c in candidates if c]
+                    if target in normalized:
+                        chosen = js
+                        chosen_index = idx
+                        break
+                except Exception:
+                    continue
+
+        if not chosen:
+            chosen = pygame.joystick.Joystick(0)
+            chosen.init()
+            chosen_index = 0
+
+        try:
+            name = (chosen.get_name() or "").strip()
+        except Exception:
+            name = ""
+        try:
+            guid = str(chosen.get_guid())
+        except Exception:
+            guid = ""
+        self._js_identifier = _joystick_identifier(name, guid, chosen_index).strip().lower()
+        return chosen
 
     def axis(self, idx):
         # Virtual joystick overrides physical when enabled (or when no js)
@@ -1921,6 +2013,18 @@ class SenderThread(threading.Thread):
             flush_logs()
             try:
                 use_virtual = settings.get("virtual_joystick_enabled", False)
+                target_usb = str(settings.get("usb_device") or "").strip().lower()
+
+                if not use_virtual and self.js:
+                    if target_usb and target_usb != (self._js_identifier or ""):
+                        try:
+                            self.js.quit()
+                        except Exception:
+                            pass
+                        self.js = None
+                        self._js_identifier = ""
+                        status["joystick_name"] = ""
+                        status["axes"] = status["buttons"] = 0
 
                 if not use_virtual and not self.js:
                     self.js = self.init_joystick()
@@ -2298,6 +2402,14 @@ def api_network_adapters():
     return jsonify({
         "adapters": list_network_interfaces(),
         "selected": get_sacn_bind_addresses()
+    })
+
+
+@APP.route("/api/usb/devices", methods=["GET"])
+def api_usb_devices():
+    return jsonify({
+        "devices": list_usb_devices(),
+        "selected": str(settings.get("usb_device") or "")
     })
 
 
