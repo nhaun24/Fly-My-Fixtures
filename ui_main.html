@@ -193,6 +193,26 @@
             </div>
           </details>
 
+          <!-- USB Device -->
+          <details class="section" open>
+            <summary>USB Device</summary>
+            <div class="inner">
+              <div class="grid">
+                <div style="grid-column:1 / -1">
+                  <label for="usb_device">USB Device</label>
+                  <div class="switch" style="align-items:flex-end;gap:8px;flex-wrap:wrap;">
+                    <select name="usb_device" id="usb_device">
+                      <option value="">Loading…</option>
+                    </select>
+                    <button class="btn" type="button" id="usb-refresh-btn" onclick="refreshUsbDevices()">Refresh</button>
+                  </div>
+                  <small class="muted">Choose which USB joystick/device to use. Leave blank to auto-select the first detected device.</small>
+                  <p class="small muted" id="usb-device-empty" style="display:none;margin-top:4px;">No USB devices detected.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
           <!-- Input mapping -->
           <details class="section" open>
             <summary>Input Mapping (Axes &amp; Buttons)</summary>
